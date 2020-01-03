@@ -1,0 +1,24 @@
+name: Docker Image CI
+
+on: 
+  release:
+    types: [created, edited]
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Build the Docker image
+      run: docker build . --file Dockerfile --tag virtaltd/charge-device-simulator:$(date +%s)
+    - name: Docker Login
+      run: docker login --username ${{ secrets.DOCKER_USERNAME }} --password ${{ secrets.DOCKER_PASSWORD }}
+    - name: Docker Push
+      run: docker push virtaltd/charge-device-simulator:$(date +%s)
+    - name: Docker Tag Latest
+      run: docker tag virtaltd/charge-device-simulator:$(date +%s) virtaltd/charge-device-simulator:latest
+    - name: Docker Tag Latest Push
+      run: docker push virtaltd/charge-device-simulator:latest
