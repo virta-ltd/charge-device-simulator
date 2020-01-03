@@ -1,0 +1,3 @@
+# Default to LF (no CRLF on windows)
+* eol=lf
+* text=auto

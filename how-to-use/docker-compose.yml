@@ -1,0 +1,11 @@
+version: '3.7'
+
+services:
+  charge-device-simulator:
+    image: virtaltd/charge-device-simulator:latest
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    command: [
+      "--config=./config.yaml",
+      "--simulation=sim1"
+    ]
