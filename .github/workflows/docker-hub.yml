@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: Docker Hub Image Release
 
 on: 
   release:
@@ -15,7 +15,7 @@ jobs:
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag virtaltd/charge-device-simulator:$(date +%s)
     - name: Docker Login
-      run: docker login --username ${{ secrets.DOCKER_USERNAME }} --password ${{ secrets.DOCKER_PASSWORD }}
+      run: docker login --username "${{ secrets.DOCKER_USERNAME }}" --password "${{ secrets.DOCKER_PASSWORD }}"
     - name: Docker Push
       run: docker push virtaltd/charge-device-simulator:$(date +%s)
     - name: Docker Tag Latest
