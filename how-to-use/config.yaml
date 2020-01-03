@@ -1,0 +1,45 @@
+# All your simulations identified by their name
+simulations:
+  - name: sim1 # Simulation name
+    device_name: test-ocpp-j-1 # Device name to be used on this simulation (it can be a name of any of devices defined below)
+    flow_charge_options: # Options passing to charge start when a charge flow gets started
+      idTag: "FAKE_RFID" # The idTag to be used for authorization
+    is_interactive: false # If true, you can ask for different flows and commands while the simulation is running using your keyboard
+    error_exit: false # If true (default), the app will crash if a response is not succeeded
+    frequent_flow_enabled: true # If true, flows defined below will be run frequently using defined options
+    frequent_flows: # Defined frequent flows. You can choose to run any number of them (add more or delete not wanted ones)
+      - flow: heartbeat # A flow of sending heartbeat
+        delay_seconds: 30 # delay between each run in seconds
+        count: -1 # How many times this flow should be run, if -1 it would run forever
+      - flow: authorize # A flow of sending authorize
+        delay_seconds: 60 # delay between each run in seconds
+        count: -1 # How many times this flow should be run, if -1 it would run forever
+      - flow: charge # A full session of charging (status, start/stop, meter values, ...)
+        delay_seconds: 180 # delay between each run in seconds
+        count: 5 # How many times this flow should be run, if -1 it would run forever
+
+# All your devices identified by their name
+devices:
+  - type: ocpp-j # Device protocol (supported values for now: ocpp-j, ensto)
+    name: test-ocpp-j-1 # Name of the device
+    server_address: "ws://sample-server.com:80" # Target ocpp-j server endpoint and port
+    register_on_initialize: true # Send boot notification after connection
+    spec_identifier: Sample_Device_0001 # OCPP-J property, identifier
+    spec_chargeBoxSerialNumber: 1234 # OCPP-J property
+    spec_chargePointModel: Model_X # OCPP-J property
+    spec_chargePointVendor: Vendor_X # OCPP-J property
+    spec_firmwareVersion: 1.1.1 # OCPP-J property
+    spec_iccid: 4321 # OCPP-J property
+    spec_imsi: 5678 # OCPP-J property
+    spec_meterType: MeterType_X # OCPP-J property
+    spec_meterSerialNumber: NO_ID # OCPP-J property
+
+  - type: ensto
+    name: test-ensto-1
+    server_host: "sample-server.com" # Sample Server
+    server_port: 3000
+    register_on_initialize: true
+    spec_identifier: device_simulator_test_ensto_1
+    spec_vendor: Vendor_X
+    spec_model: Model_X
+    spec_sw: SW_X

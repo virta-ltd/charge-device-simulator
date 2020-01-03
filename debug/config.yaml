@@ -1,0 +1,77 @@
+simulations:
+  - name: sim1
+    device_name: test-1
+    flow_charge_options:
+      idTag: "FAKE_RFID"
+    is_interactive: true
+    frequent_flow_enabled: true
+    frequent_flows:
+      - flow: heartbeat
+        delay_seconds: 30
+        count: -1
+      - flow: charge
+        delay_seconds: 120
+        count: 2
+  - name: sim2
+    device_name: test-2
+    flow_charge_options:
+      idTag: "FAKE_RFID"
+    is_interactive: false
+    frequent_flow_enabled: true
+    frequent_flows:
+      - flow: heartbeat
+        delay_seconds: 30
+        count: -1
+  - name: sim3
+    device_name: test-1
+    flow_charge_options:
+      idTag: "FAKE_RFID"
+    is_interactive: false
+    error_exit: false
+    frequent_flow_enabled: true
+    frequent_flows:
+      - flow: authorize
+        delay_seconds: 15
+        count: -1
+  - name: sim4
+    device_name: test-ensto-1
+    flow_charge_options:
+      idTag: "FAKE_RFID"
+    is_interactive: false
+    error_exit: false
+    frequent_flow_enabled: true
+    frequent_flows:
+      - flow: authorize
+        delay_seconds: 15
+        count: -1
+
+devices:
+  - type: ocpp-j
+    name: test-1
+    server_address: "ws://sample-server.com:80" # Sample Server Address
+    register_on_initialize: true
+    spec_identifier: charge_device_test_0001
+    spec_chargeBoxSerialNumber: 1234
+    spec_chargePointModel: Model_X
+    spec_chargePointVendor: Vendor_X
+    spec_firmwareVersion: 1.1.1
+    spec_iccid: 4321
+    spec_imsi: 5678
+    spec_meterType: MeterType_X
+    spec_meterSerialNumber: NO_ID
+
+  - type: ocpp-j
+    name: test-2
+    server_address: "ws://sample-server.com:80" # Sample Server Address
+    register_on_initialize: false
+    spec_identifier: charge_device_test_0002
+
+  - type: ensto
+    name: test-ensto-1
+    server_host: "sample-server.com" # Sample Server Host
+    server_port: 3000
+    register_on_initialize: true
+    spec_identifier: device_simulator_test_ensto_1
+    spec_vendor: Ensto
+    spec_model: Model_X
+    spec_sw: SW_X
