@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 
 class ConfigParser():
 
-    def parse_simulator(self, device_target: device_target.DeviceAbstract, config) -> device_target.Simulator:
+    def parse_simulator(self, device_target: device.DeviceAbstract, config) -> device.Simulator:
         if device_target is None:
             return None
         if 'error_exit' in config:
@@ -15,7 +15,7 @@ class ConfigParser():
         result.frequent_flow_enabled = config['frequent_flow_enabled']
         if 'frequent_flows' in config:
             for ff in config['frequent_flows']:
-                result.frequent_flows[device_target.Flows(ff['flow'])] = device_target.FrequentFlowOptions(
+                result.frequent_flows[device.Flows(ff['flow'])] = device.FrequentFlowOptions(
                     ff['delay_seconds'],
                     ff['count']
                 )

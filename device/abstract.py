@@ -6,9 +6,12 @@ import sys
 
 
 class DeviceAbstract(abc.ABC):
+    on_error = []
+
     def __init__(self, device_id):
         self.register_on_initialize = True
         self.deviceId = device_id
+        self.name = ''
 
     @property
     @abc.abstractmethod
@@ -16,7 +19,7 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def initialize(self):
+    def initialize(self) -> bool:
         pass
 
     @abc.abstractmethod
@@ -27,6 +30,8 @@ class DeviceAbstract(abc.ABC):
 
     def handle_error(self, desc) -> bool:
         self.logger.error(desc)
+        for event in self.on_error:
+            event(desc)
         if self.error_exit:
             loop = asyncio.get_event_loop()
             loop.call_soon_threadsafe(loop.stop)

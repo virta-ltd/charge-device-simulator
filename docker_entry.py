@@ -2,9 +2,9 @@ import asyncio
 import logging
 
 import coloredlogs
-from executer_cli import ExecuterCli
+from .runtime import ExecutorCli
 
 coloredlogs.install(logging.DEBUG)
-executer = ExecuterCli()
+executer = ExecutorCli()
 executer.initialize()
 asyncio.run(executer.execute())

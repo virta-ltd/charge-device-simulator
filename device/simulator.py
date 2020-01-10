@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import typing
 
 import aioconsole
@@ -21,9 +22,11 @@ class Simulator:
     frequent_flow_enabled = True
     is_interactive = False
     frequent_flows: typing.Dict[Flows, FrequentFlowOptions] = {}
+    on_error = []
 
     def __init__(self, device: DeviceAbstract):
         self.device = device
+        self.name = ''
 
     async def loop_flow_frequent(self):
         time = 0
@@ -77,8 +80,11 @@ class Simulator:
         pass
 
     def initialize(self):
+        self.device.on_error = self.on_error
         self.logger.info("Initialize")
-        self.device.initialize()
+        while not self.device.initialize():
+            time.sleep(10)
+        pass
 
     async def lifecycle_start(self):
         tasks = []

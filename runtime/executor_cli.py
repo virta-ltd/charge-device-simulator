@@ -5,11 +5,12 @@ from typing import Any, Dict, Optional
 import yaml
 
 import device
-from config_parser import ConfigParser
+from .config_parser import ConfigParser
 
 
-class ExecuterCli():
+class ExecutorCli():
     simulator: device.Simulator = None
+    on_error = []
 
     @staticmethod
     def __any_constructor(loader, tag_suffix, node):
@@ -28,7 +29,7 @@ class ExecuterCli():
                 template = yaml.safe_load(fs1)
         return template
 
-    def initialize(self):
+    def initialize(self, args=None):
         yaml.add_multi_constructor(
             '',
             self.__any_constructor,
@@ -41,10 +42,11 @@ class ExecuterCli():
             "--simulation",
             help="Simulation name (defined in config file) to run"
         )
-        args = parser.parse_args()
-        config: Dict[str, Any] = self.__file_load(args.config)
+        if args is None:
+            args = vars(parser.parse_args())
+        config: Dict[str, Any] = self.__file_load(args['config'])
         config_simulation = list(
-            filter(lambda x: x['name'] == args.simulation, config['simulations']))[0]
+            filter(lambda x: x['name'] == args['simulation'], config['simulations']))[0]
         config_device = list(filter(
             lambda x: x['name'] == config_simulation['device_name'], config['devices']))[0]
         config_parser = ConfigParser()
@@ -52,6 +54,9 @@ class ExecuterCli():
             config_parser.parse_device(config_device),
             config_simulation
         )
+        self.simulator.name = args['simulation']
+        self.simulator.device.name = config_simulation['device_name']
+        self.simulator.on_error = self.on_error
         pass
 
     async def execute(self):

@@ -3,6 +3,7 @@ import datetime
 import json
 import logging
 import math
+import sys
 import uuid
 
 import aioconsole
@@ -32,13 +33,20 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     def logger(self) -> logging:
         return self.__logger
 
-    def initialize(self):
-        self._ws = create_connection(f"{self.server_address}/{self.deviceId}", subprotocols=['ocpp1.6'])
-        self.logger.info("Connected")
-        if self.register_on_initialize:
-            self.action_register()
-        self.action_heart_beat()
-        pass
+    def initialize(self) -> bool:
+        try:
+            self._ws = create_connection(f"{self.server_address}/{self.deviceId}", subprotocols=['ocpp1.6'])
+            self.logger.info("Connected")
+            if self.register_on_initialize:
+                self.action_register()
+            self.action_heart_beat()
+            return True
+        except ValueError as err:
+            self.handle_error(str(err))
+            return False
+        except:
+            self.handle_error(str(sys.exc_info()[0]))
+            return False
 
     def end(self):
         self._ws.close()
@@ -124,9 +132,9 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
 
     def charge_meter_value_current(self, **options):
         return math.floor(self.charge_meter_start + (
-                (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
-                * options.pop("chargedKwhPerMinute", 1)
-                * 1000
+            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+            * options.pop("chargedKwhPerMinute", 1)
+            * 1000
         ))
 
     def action_meter_value(self, **options) -> bool:
@@ -185,7 +193,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         return True
 
     async def flow_charge(self, **options) -> bool:
-        log_title = self.flow_charge().__name__
+        log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
         if not self.action_authorize(**options):
             return False

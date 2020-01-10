@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import socket
+import sys
 from urllib import parse
 
 import aioconsole
@@ -29,14 +30,21 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     def logger(self) -> logging:
         return self.__logger
 
-    def initialize(self):
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._socket.connect((self.server_host, self.server_port))
-        self.logger.info("Connected")
-        if self.register_on_initialize:
-            self.action_register()
-        self.action_heart_beat()
-        pass
+    def initialize(self) -> bool:
+        try:
+            self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._socket.connect((self.server_host, self.server_port))
+            self.logger.info("Connected")
+            if self.register_on_initialize:
+                self.action_register()
+            self.action_heart_beat()
+            return True
+        except ValueError as err:
+            self.handle_error(str(err))
+            return False
+        except:
+            self.handle_error(str(sys.exc_info()[0]))
+            return False
 
     def end(self):
         self._socket.close()
@@ -126,9 +134,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
 
     def charge_meter_value_current(self, **options):
         return math.floor(self.charge_meter_start + (
-                (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
-                * options.pop("chargedKwhPerMinute", 1)
-                * 1000
+            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+            * options.pop("chargedKwhPerMinute", 1)
+            * 1000
         ))
 
     def action_meter_value(self, **options) -> bool:
@@ -183,7 +191,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         return True
 
     async def flow_charge(self, **options) -> bool:
-        log_title = self.flow_charge().__name__
+        log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
         if not self.action_authorize(**options):
             return False
