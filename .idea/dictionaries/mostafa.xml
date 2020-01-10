@@ -3,6 +3,9 @@
     <words>
       <w>ensto</w>
       <w>rfid</w>
+      <w>iccid</w>
+      <w>imsi</w>
+      <w>ocpp</w>
     </words>
   </dictionary>
 </component>

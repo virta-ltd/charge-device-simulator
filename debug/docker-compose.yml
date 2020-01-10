@@ -9,7 +9,7 @@ services:
     container_name: charge-device-simulator
     volumes:
       - ./config.yaml:/app/config.yaml
-      - ../simulator-executor.py:/app/simulator-executor.py
+      - ../docker_entry.py:/app/docker_entry.py
       - ../device/simulator.py:/app/device/simulator.py
     command: [
       "--config=./config.yaml",

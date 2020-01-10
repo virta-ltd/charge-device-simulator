@@ -19,6 +19,7 @@ class Simulator:
     is_ended = False
     flow_charge_options: None
     frequent_flow_enabled = True
+    is_interactive = False
     frequent_flows: typing.Dict[Flows, FrequentFlowOptions] = {}
 
     def __init__(self, device: DeviceAbstract):
@@ -50,11 +51,14 @@ class Simulator:
                     if f_flow == Flows.Heartbeat:
                         task_def = self.device.flow_heartbeat()
                     elif f_flow == Flows.Authorize:
-                        task_def = self.device.flow_authorize(**self.flow_charge_options)
+                        task_def = self.device.flow_authorize(
+                            **self.flow_charge_options)
                     elif f_flow == Flows.Charge:
-                        task_def = self.device.flow_charge(**self.flow_charge_options)
+                        task_def = self.device.flow_charge(
+                            **self.flow_charge_options)
                     if task_def is not None:
-                        self.logger.info(f"Frequent Flow, Started, Flow: {f_flow}, Time: {time}")
+                        self.logger.info(
+                            f"Frequent Flow, Started, Flow: {f_flow}, Time: {time}")
                         tasks[f_flow.name] = asyncio.create_task(task_def)
                     f_options.run_counter += 1
                     f_options.run_last_time = time
@@ -65,7 +69,8 @@ class Simulator:
                     self.frequent_flows[x].run_counter < self.frequent_flows[x].count,
                     self.frequent_flows
             ))) <= 0:
-                self.logger.info(f"No more frequent flow to run, wait for running tasks")
+                self.logger.info(
+                    f"No more frequent flow to run, wait for running tasks")
                 await asyncio.gather(*(tasks.values()))
                 self.logger.info(f"No more frequent flow to run, exiting loop")
                 break
@@ -75,9 +80,9 @@ class Simulator:
         self.logger.info("Initialize")
         self.device.initialize()
 
-    async def lifecycle_start(self, is_interactive=False):
+    async def lifecycle_start(self):
         tasks = []
-        if is_interactive:
+        if self.is_interactive:
             tasks.append(self.loop_interactive())
         if self.frequent_flow_enabled:
             tasks.append(self.loop_flow_frequent())
