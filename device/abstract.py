@@ -26,6 +26,11 @@ class DeviceAbstract(abc.ABC):
     def end(self):
         pass
 
+    def re_initialize(self):
+        self.end()
+        self.initialize()
+        pass
+
     error_exit = True
 
     def handle_error(self, desc) -> bool:
@@ -36,6 +41,8 @@ class DeviceAbstract(abc.ABC):
             loop = asyncio.get_event_loop()
             loop.call_soon_threadsafe(loop.stop)
             sys.exit(1)
+        else:
+            self.re_initialize()
         pass
 
     @abc.abstractmethod
