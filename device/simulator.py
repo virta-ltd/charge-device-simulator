@@ -105,11 +105,18 @@ class Simulator:
 What should I do? (enter the number + enter)
 0: Exit
 1: Flow charge
-2: Flow frequent
-3: Custom
+2: Flow heartbeat
+3: Flow authorize
+99: Custom
 """)
             if input1 == "0":
                 return
+            elif input1 == "1":
+                await self.device.flow_charge(**self.flow_charge_options)
+            elif input1 == "2":
+                await self.device.flow_heartbeat()
             elif input1 == "3":
+                await self.device.flow_authorize(**self.flow_charge_options)
+            elif input1 == "99":
                 await self.device.loop_interactive_custom()
         pass
