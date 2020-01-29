@@ -5,17 +5,21 @@ import logging
 import math
 import sys
 import uuid
+import typing
 
 import aioconsole
-from websocket import create_connection
+import websockets
 
 import device.abstract
+from device.ocpp_j.message_types import MessageTypes
 
 
 class DeviceOcppJ(device.abstract.DeviceAbstract):
     server_address = ""
     __logger = logging.getLogger(__name__)
     _ws = None
+    __loop_internal_task: asyncio.Task = None
+    __pending_by_device_reqs: typing.Dict[str, typing.Callable[[typing.Any], None]] = {}
 
     def __init__(self, device_id):
         super().__init__(device_id)
@@ -33,26 +37,36 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     def logger(self) -> logging:
         return self.__logger
 
-    def initialize(self) -> bool:
+    async def initialize(self) -> bool:
         try:
-            self._ws = create_connection(f"{self.server_address}/{self.deviceId}", subprotocols=['ocpp1.6'])
+            logging.getLogger('websockets.client').setLevel(logging.WARNING)
+            logging.getLogger('websockets.server').setLevel(logging.WARNING)
+            logging.getLogger('websockets.protocol').setLevel(logging.WARNING)
+            self._ws = await websockets.connect(f"{self.server_address}/{self.deviceId}", subprotocols=['ocpp1.6'])
+            self.__loop_internal_task = asyncio.create_task(self.__loop_internal())
+
+            await asyncio.sleep(2)
             self.logger.info("Connected")
+
             if self.register_on_initialize:
-                self.action_register()
-            self.action_heart_beat()
+                await self.action_register()
+            await self.action_heart_beat()
             return True
         except ValueError as err:
-            self.handle_error(str(err))
+            await self.handle_error(str(err))
             return False
         except:
-            self.handle_error(str(sys.exc_info()[0]))
+            await self.handle_error(str(sys.exc_info()[0]))
             return False
 
-    def end(self):
-        self._ws.close()
+    async def end(self):
+        if self.__loop_internal_task is not None:
+            self.__loop_internal_task.cancel()
+        if self._ws is not None:
+            await self._ws.close()
         pass
 
-    def action_register(self) -> bool:
+    async def action_register(self) -> bool:
         action = "BootNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -66,22 +80,22 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             'meterSerialNumber': self.spec_meterSerialNumber,
             'chargePointSerialNumber': "Not set",
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['status'] != 'Accepted':
-            self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed")
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_heart_beat(self) -> bool:
+    async def action_heart_beat(self) -> bool:
         action = "HeartBeat"
         self.logger.info(f"Action {action} Start")
-        if self.by_device_req_send(action, {}) is None:
+        if await self.by_device_req_send(action, {}) is None:
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_status_update(self, status, **options) -> bool:
+    async def action_status_update(self, status, **options) -> bool:
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -89,20 +103,20 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             "errorCode": "NoError",
             "status": status
         }
-        if self.by_device_req_send(action, json_payload) is None:
+        if await self.by_device_req_send(action, json_payload) is None:
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, **options) -> bool:
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
         json_payload = {
             "idTag": options.pop("idTag", "-")
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
-            self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed")
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -111,7 +125,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     charge_meter_start = 1000
     charge_transaction_id = -1
 
-    def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, **options) -> bool:
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
         self.charge_start_time = datetime.datetime.utcnow()
@@ -122,9 +136,9 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             "meterStart": self.charge_meter_start,
             "idTag": options.pop("idTag", "-")
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
-            self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed")
             return False
         self.charge_transaction_id = resp_json[2]['transactionId']
         self.logger.info(f"Action {action} End")
@@ -137,7 +151,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             * 1000
         ))
 
-    def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, **options) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -154,12 +168,13 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
                 }]
             }]
         }
-        if self.by_device_req_send(action, json_payload) is None:
+        resp_json = await self.by_device_req_send(action, json_payload)
+        if resp_json is None:
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, **options) -> bool:
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -169,9 +184,9 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             "idTag": options.pop("idTag", "-"),
             "reason": options.pop("stopReason", "Local")
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
-            self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed")
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -179,7 +194,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     async def flow_heartbeat(self) -> bool:
         log_title = self.flow_heartbeat.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not self.action_heart_beat():
+        if not await self.action_heart_beat():
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
@@ -187,7 +202,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     async def flow_authorize(self, **options) -> bool:
         log_title = self.flow_authorize.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not self.action_authorize(**options):
+        if not await self.action_authorize(**options):
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
@@ -195,40 +210,74 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     async def flow_charge(self, **options) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not self.action_authorize(**options):
+        if not await self.action_authorize(**options):
             return False
-        if not self.action_charge_start(**options):
+        if not await self.action_charge_start(**options):
             return False
-        if not self.action_status_update("Preparing", **options):
+        if not await self.action_status_update("Preparing", **options):
             return False
-        if not self.action_status_update("Charging", **options):
+        if not await self.action_status_update("Charging", **options):
             return False
         for i in range(6):
             await asyncio.sleep(15)
-            if not self.action_meter_value(**options):
+            if not await self.action_meter_value(**options):
                 return False
         await asyncio.sleep(5)
-        if not self.action_status_update("Finishing", **options):
+        if not await self.action_status_update("Finishing", **options):
             return False
-        if not self.action_charge_stop(**options):
+        if not await self.action_charge_stop(**options):
             return False
-        if not self.action_status_update("Available", **options):
+        if not await self.action_status_update("Available", **options):
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    def by_device_req_send(self, action, json_payload):
-        req_id = uuid.uuid4()
+    async def by_device_req_send(self, action, json_payload) -> typing.Any:
+        result = asyncio.get_running_loop().create_future()
+        req_id = str(uuid.uuid4())
         req = f"""[2,"{req_id}","{action}",{json.dumps(json_payload)}]"""
-        self._ws.send(req)
+        self.__pending_by_device_reqs[req_id] = lambda resp_json: self.__by_device_req_resp_ready(result, action, req_id, resp_json)
+        await self._ws.send(req)
         self.logger.debug(f"By Device Req ({action}):\n{req}")
-        resp = self._ws.recv()
+        return await result
+        # resp = self._ws.recv()
+        # self.logger.debug(f"By Device Req ({action}) Resp:\n{resp}")
+        # resp_json = json.loads(resp)
+        # if resp_json[1] != f"{req_id}":
+        #     self.handle_error(f"Action `{action}` Req and Resp Id does not match")
+        #     return None
+        # return resp_json
+
+    def __by_device_req_resp_ready(self, future: asyncio.Future, action, req_id, resp_json):
+        resp = json.dumps(resp_json)
         self.logger.debug(f"By Device Req ({action}) Resp:\n{resp}")
-        resp_json = json.loads(resp)
-        if resp_json[1] != f"{req_id}":
-            self.handle_error(f"Action `{action}` Req and Resp Id does not match")
-            return None
-        return resp_json
+        future.set_result(resp_json)
+        pass
+
+    async def __loop_internal(self):
+        while True:
+            readRaw = await self._ws.recv()
+            readAsJson = json.loads(readRaw)
+            if len(readAsJson) < 1:
+                self.logger.warn(f"Device Read, Invalid, Message:\n{readRaw}")
+                continue
+
+            readType = int(readAsJson[0])
+            if readType == MessageTypes.Req.value:  # Received a request initiated from middleware
+                self.logger.debug(f"Device Read, Request, Message:\n{readRaw}")
+            elif readType == MessageTypes.Resp.value:  # Received a response from middleware for a request we sent to it previously
+                if len(readAsJson) < 2:
+                    self.logger.warn(f"Device Read, Response, Invalid, Message:\n{readRaw}")
+                    continue
+                readRespId = str(readAsJson[1])
+                readRespCallable = self.__pending_by_device_reqs.pop(readRespId, None)
+                if readRespCallable is None:
+                    self.logger.warn(f"Device Read, Response, Not found the request, Id: {readRespId}, Message:\n{readRaw}")
+                    continue
+                readRespCallable(readAsJson)
+            else:
+                self.logger.debug(f"Device Read, Type Unknown, Message:\n{readRaw}")
+        pass
 
     async def loop_interactive_custom(self):
         is_back = False
@@ -242,8 +291,8 @@ What should I do? (enter the number + enter)
             if input1 == "0":
                 is_back = True
             elif input1 == "1":
-                self.action_heart_beat()
+                await self.action_heart_beat()
             elif input1 == "2":
                 input1 = await aioconsole.ainput("Which status?\n")
-                self.action_status_update(input1)
+                await self.action_status_update(input1)
         pass

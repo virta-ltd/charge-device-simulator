@@ -1,5 +1,5 @@
 from .abstract import DeviceAbstract
-from .ocpp_j import DeviceOcppJ
+from .ocpp_j.device_ocpp_j import DeviceOcppJ
 from .ensto import DeviceEnsto
 from .simulator import Simulator
 from .flows import Flows

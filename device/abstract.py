@@ -19,21 +19,21 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def initialize(self) -> bool:
+    async def initialize(self) -> bool:
         pass
 
     @abc.abstractmethod
-    def end(self):
+    async def end(self):
         pass
 
-    def re_initialize(self):
-        self.end()
-        self.initialize()
+    async def re_initialize(self):
+        await self.end()
+        await self.initialize()
         pass
 
     error_exit = True
 
-    def handle_error(self, desc) -> bool:
+    async def handle_error(self, desc) -> bool:
         self.logger.error(desc)
         for event in self.on_error:
             event(desc)
@@ -42,35 +42,35 @@ class DeviceAbstract(abc.ABC):
             loop.call_soon_threadsafe(loop.stop)
             sys.exit(1)
         else:
-            self.re_initialize()
+            return False
         pass
 
     @abc.abstractmethod
-    def action_register(self) -> bool:
+    async def action_register(self) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_heart_beat(self) -> bool:
+    async def action_heart_beat(self) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_status_update(self, status, **options) -> bool:
+    async def action_status_update(self, status, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, **options) -> bool:
         pass
 
     @abc.abstractmethod

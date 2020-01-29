@@ -79,11 +79,11 @@ class Simulator:
                 break
         pass
 
-    def initialize(self):
+    async def initialize(self):
         self.device.on_error = self.on_error
         self.logger.info("Initialize")
-        while not self.device.initialize():
-            time.sleep(10)
+        while not await self.device.initialize():
+            await asyncio.sleep(10)
         pass
 
     async def lifecycle_start(self):
@@ -94,9 +94,9 @@ class Simulator:
             tasks.append(self.loop_flow_frequent())
         await asyncio.gather(*tasks)
 
-    def end(self):
+    async def end(self):
         self.is_ended = True
-        self.device.end()
+        await self.device.end()
         pass
 
     async def loop_interactive(self):
