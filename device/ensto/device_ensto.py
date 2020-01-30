@@ -3,13 +3,14 @@ import datetime
 import json
 import logging
 import math
-import socket
 import sys
+import typing
 from urllib import parse
 
 import aioconsole
-
 import device.abstract
+
+from .pending_req import PendingReq
 
 
 # noinspection DuplicatedCode
@@ -17,7 +18,10 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     server_host = ""
     server_port = 3000
     __logger = logging.getLogger(__name__)
-    _socket = None
+    __loop_internal_task: asyncio.Task = None
+    __socketWriter: asyncio.StreamWriter = None
+    __socketReader: asyncio.StreamReader = None
+    __pending_by_device_reqs: typing.Dict[str, PendingReq] = {}
 
     def __init__(self, device_id):
         super().__init__(device_id)
@@ -30,27 +34,35 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     def logger(self) -> logging:
         return self.__logger
 
-    def initialize(self) -> bool:
+    # noinspection PyBroadException
+    async def initialize(self) -> bool:
         try:
-            self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._socket.connect((self.server_host, self.server_port))
+            self.__socketReader, self.__socketWriter = await asyncio.open_connection(self.server_host, self.server_port)
+            self.__loop_internal_task = asyncio.create_task(self.__loop_internal())
+
+            await asyncio.sleep(1)
             self.logger.info("Connected")
+
             if self.register_on_initialize:
-                self.action_register()
-            self.action_heart_beat()
+                await self.action_register()
+            await self.action_heart_beat()
             return True
         except ValueError as err:
-            self.handle_error(str(err))
+            await self.handle_error(str(err))
             return False
         except:
-            self.handle_error(str(sys.exc_info()[0]))
+            await self.handle_error(str(sys.exc_info()[0]))
             return False
 
-    def end(self):
-        self._socket.close()
+    async def end(self):
+        if self.__loop_internal_task is not None:
+            self.__loop_internal_task.cancel()
+        if self.__socketWriter is not None:
+            self.__socketWriter.close()
+            await self.__socketWriter.wait_closed()
         pass
 
-    def action_register(self) -> bool:
+    async def action_register(self) -> bool:
         action = "register"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -61,28 +73,28 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             'sw': self.spec_sw,
             'isLoadTest': 1
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'uv' not in resp_json:
-            self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed")
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_heart_beat(self) -> bool:
+    async def action_heart_beat(self) -> bool:
         action = "heart_beat"
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 24,
             'time': 1,
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'time' not in resp_json:
-            self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
+            await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_status_update(self, status, **options) -> bool:
+    async def action_status_update(self, status, **options) -> bool:
         action = "status_update"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -90,23 +102,23 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             'ping': None,
             "status": status
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
-            self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
+            await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, **options) -> bool:
         action = "authorize"
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 10,
             "rfid": options.pop("idTag", "-")
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'success' not in resp_json:
-            self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
+            await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -114,7 +126,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     charge_start_time = datetime.datetime.utcnow()
     charge_meter_start = 1000
 
-    def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, **options) -> bool:
         action = "charge_start"
         self.logger.info(f"Action {action} Start")
         self.charge_start_time = datetime.datetime.utcnow()
@@ -125,9 +137,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             "chg": 2,
             "out": options.pop("connectorId", 1),
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
-            self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
+            await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -139,7 +151,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             * 1000
         ))
 
-    def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, **options) -> bool:
         action = "meter_value"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -149,14 +161,14 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             "t": 382,
             "eem": self.charge_meter_value_current(**options) - self.charge_meter_start,
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
-            self.handle_error(f"Action {action} (Response Failed:\n{json.dumps(resp_json)}") / 1000
+            await self.handle_error(f"Action {action} (Response Failed:\n{json.dumps(resp_json)}") / 1000
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, **options) -> bool:
         action = "charge_stop"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -167,9 +179,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             "kwh": (self.charge_meter_value_current(**options) - self.charge_meter_start) / 1000,
             "timestamp": self.utcnow_iso(),
         }
-        resp_json = self.by_device_req_send(action, json_payload)
+        resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
-            self.handle_error(f"Action {action} (Response Failed:\n{json.dumps(resp_json)}") / 1000
+            await self.handle_error(f"Action {action} (Response Failed:\n{json.dumps(resp_json)}") / 1000
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -177,7 +189,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def flow_heartbeat(self) -> bool:
         log_title = self.flow_heartbeat.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not self.action_heart_beat():
+        if not await self.action_heart_beat():
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
@@ -185,7 +197,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def flow_authorize(self, **options) -> bool:
         log_title = self.flow_authorize.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not self.action_authorize(**options):
+        if not await self.action_authorize(**options):
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
@@ -193,48 +205,76 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def flow_charge(self, **options) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not self.action_authorize(**options):
+        if not await self.action_authorize(**options):
             return False
-        if not self.action_status_update("1", **options):
+        if not await self.action_status_update("1", **options):
             return False
-        if not self.action_charge_start(**options):
+        if not await self.action_charge_start(**options):
             return False
-        if not self.action_status_update("1", **options):
+        if not await self.action_status_update("1", **options):
             return False
         for i in range(6):
             await asyncio.sleep(15)
-            if not self.action_meter_value(**options):
+            if not await self.action_meter_value(**options):
                 return False
-            if not self.action_status_update("1", **options):
+            if not await self.action_status_update("1", **options):
                 return False
         await asyncio.sleep(5)
-        if not self.action_status_update("0", **options):
+        if not await self.action_status_update("0", **options):
             return False
-        if not self.action_charge_stop(**options):
+        if not await self.action_charge_stop(**options):
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    def by_device_req_send(self, action, json_payload, valid_ids=None):
+    async def by_device_req_send(self, action, json_payload, valid_ids: typing.Sequence = None):
+        result = asyncio.get_running_loop().create_future()
+        req_id = str(json_payload['id'])
         req = f"""imei={self.deviceId}"""
         for key, value in json_payload.items():
             req += f"&{parse.quote_plus(key)}"
             if value is not None:
                 value_s = f"{value}"
                 req += f"={parse.quote_plus(value_s)}"
-        self._socket.send(req.encode())
+        self.__pending_by_device_reqs[req_id] = PendingReq(valid_ids, lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json))
+        self.__socketWriter.write(req.encode())
+        await self.__socketWriter.drain()
         self.logger.debug(f"By Device Req ({action}):\n{req}")
-        resp = self._socket.recv(1024).decode()
+        return await result
+
+    def __by_device_req_resp_ready(self, future: asyncio.Future, action, resp_json):
+        resp = json.dumps(resp_json)
         self.logger.debug(f"By Device Req ({action}) Resp:\n{resp}")
-        resp_json = {}
-        for term in resp.split('&'):
-            term_break = term.split('=')
-            resp_json[term_break[0]] = term_break[1] if len(term_break) > 1 else None
-        resp_id = f"{resp_json['id']}"
-        if resp_id != f"{json_payload['id']}" and (valid_ids is None or resp_id not in valid_ids):
-            self.handle_error(f"Action `{action}` Req and Resp id does not match, Resp:\n{json.dumps(resp_json)}")
-            return None
-        return resp_json
+        future.set_result(resp_json)
+        pass
+
+    async def __loop_internal(self):
+        try:
+            while True:
+                read_raw = (await self.__socketReader.readline()).decode()
+                read_as_json = {}
+                for term in read_raw.split('&'):
+                    term_break = term.split('=')
+                    read_as_json[term_break[0]] = term_break[1] if len(term_break) > 1 else None
+                read_id = str(read_as_json['id'])
+
+                # Find possible pending req by its id (dict)
+                pending_req = self.__pending_by_device_reqs.pop(read_id, None)
+                # If not found, try finding in valid_ids
+                if pending_req is None:
+                    key = next(
+                        (item_key for item_key, item_value in self.__pending_by_device_reqs.items() if read_id in item_value.valid_ids),
+                        None
+                    )
+                    pending_req = self.__pending_by_device_reqs.pop(key, None)
+
+                if pending_req is not None:  # Received a response from middleware for a request we sent to it previously
+                    pending_req.resp_callable(read_as_json)
+                else:
+                    self.logger.warning(f"Device Read, Unhandled, Message:\n{read_raw}")
+        except asyncio.CancelledError:
+            return
+        pass
 
     async def loop_interactive_custom(self):
         is_back = False
@@ -248,8 +288,8 @@ What should I do? (enter the number + enter)
             if input1 == "0":
                 is_back = True
             elif input1 == "1":
-                self.action_heart_beat()
+                await self.action_heart_beat()
             elif input1 == "2":
                 input1 = await aioconsole.ainput("Which status?\n")
-                self.action_status_update(input1)
+                await self.action_status_update(input1)
         pass

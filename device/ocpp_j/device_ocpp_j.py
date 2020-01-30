@@ -4,13 +4,12 @@ import json
 import logging
 import math
 import sys
-import uuid
 import typing
+import uuid
 
 import aioconsole
-import websockets
-
 import device.abstract
+import websockets
 from device.ocpp_j.message_types import MessageTypes
 
 
@@ -42,10 +41,13 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             logging.getLogger('websockets.client').setLevel(logging.WARNING)
             logging.getLogger('websockets.server').setLevel(logging.WARNING)
             logging.getLogger('websockets.protocol').setLevel(logging.WARNING)
-            self._ws = await websockets.connect(f"{self.server_address}/{self.deviceId}", subprotocols=['ocpp1.6'])
+            self._ws = await websockets.connect(
+                f"{self.server_address}/{self.deviceId}",
+                subprotocols=[websockets.Subprotocol('ocpp1.6')]
+            )
             self.__loop_internal_task = asyncio.create_task(self.__loop_internal())
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
             self.logger.info("Connected")
 
             if self.register_on_initialize:
@@ -146,9 +148,9 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
 
     def charge_meter_value_current(self, **options):
         return math.floor(self.charge_meter_start + (
-            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
-            * options.pop("chargedKwhPerMinute", 1)
-            * 1000
+                (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+                * options.pop("chargedKwhPerMinute", 1)
+                * 1000
         ))
 
     async def action_meter_value(self, **options) -> bool:
@@ -236,47 +238,43 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         result = asyncio.get_running_loop().create_future()
         req_id = str(uuid.uuid4())
         req = f"""[2,"{req_id}","{action}",{json.dumps(json_payload)}]"""
-        self.__pending_by_device_reqs[req_id] = lambda resp_json: self.__by_device_req_resp_ready(result, action, req_id, resp_json)
+        self.__pending_by_device_reqs[req_id] = lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json)
         await self._ws.send(req)
         self.logger.debug(f"By Device Req ({action}):\n{req}")
         return await result
-        # resp = self._ws.recv()
-        # self.logger.debug(f"By Device Req ({action}) Resp:\n{resp}")
-        # resp_json = json.loads(resp)
-        # if resp_json[1] != f"{req_id}":
-        #     self.handle_error(f"Action `{action}` Req and Resp Id does not match")
-        #     return None
-        # return resp_json
 
-    def __by_device_req_resp_ready(self, future: asyncio.Future, action, req_id, resp_json):
+    def __by_device_req_resp_ready(self, future: asyncio.Future, action, resp_json):
         resp = json.dumps(resp_json)
         self.logger.debug(f"By Device Req ({action}) Resp:\n{resp}")
         future.set_result(resp_json)
         pass
 
     async def __loop_internal(self):
-        while True:
-            readRaw = await self._ws.recv()
-            readAsJson = json.loads(readRaw)
-            if len(readAsJson) < 1:
-                self.logger.warn(f"Device Read, Invalid, Message:\n{readRaw}")
-                continue
+        try:
+            while True:
+                read_raw = await self._ws.recv()
+                read_as_json = json.loads(read_raw)
+                if len(read_as_json) < 1:
+                    self.logger.warning(f"Device Read, Invalid, Message:\n{read_raw}")
+                    continue
 
-            readType = int(readAsJson[0])
-            if readType == MessageTypes.Req.value:  # Received a request initiated from middleware
-                self.logger.debug(f"Device Read, Request, Message:\n{readRaw}")
-            elif readType == MessageTypes.Resp.value:  # Received a response from middleware for a request we sent to it previously
-                if len(readAsJson) < 2:
-                    self.logger.warn(f"Device Read, Response, Invalid, Message:\n{readRaw}")
-                    continue
-                readRespId = str(readAsJson[1])
-                readRespCallable = self.__pending_by_device_reqs.pop(readRespId, None)
-                if readRespCallable is None:
-                    self.logger.warn(f"Device Read, Response, Not found the request, Id: {readRespId}, Message:\n{readRaw}")
-                    continue
-                readRespCallable(readAsJson)
-            else:
-                self.logger.debug(f"Device Read, Type Unknown, Message:\n{readRaw}")
+                read_type = int(read_as_json[0])
+                if read_type == MessageTypes.Req.value:  # Received a request initiated from middleware
+                    self.logger.debug(f"Device Read, Request, Message:\n{read_raw}")
+                elif read_type == MessageTypes.Resp.value:  # Received a response from middleware for a request we sent to it previously
+                    if len(read_as_json) < 2:
+                        self.logger.warning(f"Device Read, Response, Invalid, Message:\n{read_raw}")
+                        continue
+                    read_resp_id = str(read_as_json[1])
+                    read_resp_callable = self.__pending_by_device_reqs.pop(read_resp_id, None)
+                    if read_resp_callable is None:
+                        self.logger.warning(f"Device Read, Response, Not found the request, Id: {read_resp_id}, Message:\n{read_raw}")
+                        continue
+                    read_resp_callable(read_as_json)
+                else:
+                    self.logger.debug(f"Device Read, Type Unknown, Message:\n{read_raw}")
+        except asyncio.CancelledError:
+            return
         pass
 
     async def loop_interactive_custom(self):
