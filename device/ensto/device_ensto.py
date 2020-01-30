@@ -10,7 +10,7 @@ from urllib import parse
 import aioconsole
 import device.abstract
 
-from .pending_req import PendingReq
+from device.ensto.pending_req import PendingReq
 
 
 # noinspection DuplicatedCode
