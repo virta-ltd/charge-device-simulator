@@ -9,7 +9,7 @@ from urllib import parse
 
 import aioconsole
 import device.abstract
-
+from device import utility
 from device.ensto.pending_req import PendingReq
 
 
@@ -141,14 +141,15 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
             await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}")
             return False
+        self.charge_in_progress = True
         self.logger.info(f"Action {action} End")
         return True
 
     def charge_meter_value_current(self, **options):
         return math.floor(self.charge_meter_start + (
-            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
-            * options.pop("chargedKwhPerMinute", 1)
-            * 1000
+                (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+                * options.pop("chargedKwhPerMinute", 1)
+                * 1000
         ))
 
     async def action_meter_value(self, **options) -> bool:
@@ -202,45 +203,55 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    async def flow_charge(self, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, **options) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
         if not await self.action_authorize(**options):
+            self.charge_in_progress = False
             return False
         if not await self.action_status_update("1", **options):
+            self.charge_in_progress = False
             return False
         if not await self.action_charge_start(**options):
+            self.charge_in_progress = False
             return False
         if not await self.action_status_update("1", **options):
+            self.charge_in_progress = False
             return False
-        for i in range(6):
-            await asyncio.sleep(15)
-            if not await self.action_meter_value(**options):
-                return False
-            if not await self.action_status_update("1", **options):
-                return False
-        await asyncio.sleep(5)
+        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+            self.charge_in_progress = False
+            return False
         if not await self.action_status_update("0", **options):
+            self.charge_in_progress = False
             return False
         if not await self.action_charge_stop(**options):
+            self.charge_in_progress = False
             return False
         self.logger.info(f"Flow {log_title} End")
+        self.charge_in_progress = False
         return True
+
+    async def flow_charge_ongoing_actions(self, **options) -> bool:
+        return await self.action_meter_value(**options) and await self.action_status_update("1", **options)
 
     async def by_device_req_send(self, action, json_payload, valid_ids: typing.Sequence = None):
         result = asyncio.get_running_loop().create_future()
         req_id = str(json_payload['id'])
-        req = f"""imei={self.deviceId}"""
-        for key, value in json_payload.items():
-            req += f"&{parse.quote_plus(key)}"
-            if value is not None:
-                value_s = f"{value}"
-                req += f"={parse.quote_plus(value_s)}"
+        req = self.__socket_message(json_payload)
         self.__pending_by_device_reqs[req_id] = PendingReq(valid_ids, lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json))
         self.__socketWriter.write(req.encode())
         await self.__socketWriter.drain()
         self.logger.debug(f"By Device Req ({action}):\n{req}")
         return await result
+
+    def __socket_message(self, payload_dict) -> str:
+        req = f"""imei={self.deviceId}"""
+        for key, value in payload_dict.items():
+            req += f"&{parse.quote_plus(key)}"
+            if value is not None:
+                value_s = f"{value}"
+                req += f"={parse.quote_plus(value_s)}"
+        return req
 
     def __by_device_req_resp_ready(self, future: asyncio.Future, action, resp_json):
         resp = json.dumps(resp_json)
@@ -270,10 +281,84 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
 
                 if pending_req is not None:  # Received a response from middleware for a request we sent to it previously
                     pending_req.resp_callable(read_as_json)
-                else:
+                elif not await self.by_middleware_req(read_id, read_as_json):
                     self.logger.warning(f"Device Read, Unhandled, Message:\n{read_raw}")
         except asyncio.CancelledError:
             return
+        pass
+
+    async def by_middleware_req(self, req_action: str, req_payload: typing.Any) -> bool:
+        self.logger.debug(f"Device Read, Request, Message:\n{req_payload}")
+        resp_payload = None
+        if req_action in map(lambda x: str(x).lower(), [
+            "20",  # OutOfOrder
+            "11",  # ChargingRequestByServer
+            "17",  # HatchOpen
+            "42",  # Restart
+        ]):
+            resp_payload = {
+                "ack": "1"
+            }
+
+        if req_action == "11".lower():
+            req_scmd = str(req_payload["scmd"] if "scmd" in req_payload else -1)
+            if req_scmd == "1":
+                if not self.charge_can_start():
+                    del resp_payload["ack"]
+                    resp_payload["nack"] = "1"
+                else:
+                    options = {
+                        "idTag": req_payload["idtag"] if "idtag" in req_payload else "-",
+                    }
+                    self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
+                    asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
+            elif req_scmd == "0":
+                if not self.charge_can_stop(-1):
+                    del resp_payload["ack"]
+                    resp_payload["nack"] = "1"
+                else:
+                    asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
+            else:
+                del resp_payload["ack"]
+                resp_payload["nack"] = "1"
+
+        # "14", SettingsGprs
+        # "15", SettingsByServer
+        if req_action == "14".lower() or req_action == "15".lower():
+            if ("gprs" in req_payload and str(req_payload["gprs"]) == "2") or ("settings" in req_payload and str(req_payload["settings"]) == "2"):  # Try to change config
+                if "upd" in req_payload and str(req_payload["upd"]) == "1":
+                    resp_payload = {
+                        "upd": "1"
+                    }
+                else:
+                    resp_payload = {
+                        "ack": "1"
+                    }
+            else:  # Try to get config
+                resp_payload = {
+                    "type": "device-simulator",
+                    "server_host": self.server_host,
+                    "server_port": self.server_port,
+                    "identifier": self.deviceId,
+                }
+
+        # Restart
+        if req_action == "42".lower():
+            asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
+
+        if resp_payload is not None:
+            resp_payload["id"] = req_action
+            resp = self.__socket_message(resp_payload)
+            self.__socketWriter.write(resp.encode())
+            await self.__socketWriter.drain()
+            self.logger.debug(f"Device Read, Request, Responded:\n{resp}")
+            return True
+        else:
+            self.logger.warning(f"Device Read, Request, Unknown or not supported: {req_action}")
+            return False
+
+    async def flow_charge_stop(self):
+        self.charge_in_progress = False
         pass
 
     async def loop_interactive_custom(self):

@@ -10,6 +10,7 @@ import uuid
 import aioconsole
 import device.abstract
 import websockets
+from device import utility
 from device.ocpp_j.message_types import MessageTypes
 
 
@@ -125,7 +126,6 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
 
     charge_start_time = datetime.datetime.utcnow()
     charge_meter_start = 1000
-    charge_transaction_id = -1
 
     async def action_charge_start(self, **options) -> bool:
         action = "StartTransaction"
@@ -142,7 +142,8 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed")
             return False
-        self.charge_transaction_id = resp_json[2]['transactionId']
+        self.charge_id = resp_json[2]['transactionId']
+        self.charge_in_progress = True
         self.logger.info(f"Action {action} End")
         return True
 
@@ -158,7 +159,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} Start")
         json_payload = {
             "connectorId": options.pop("connectorId", 1),
-            "transactionId": self.charge_transaction_id,
+            "transactionId": self.charge_id,
             "meterValue": [{
                 "timestamp": self.utcnow_iso(),
                 "sampledValue": [{
@@ -181,7 +182,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} Start")
         json_payload = {
             "timestamp": self.utcnow_iso(),
-            "transactionId": self.charge_transaction_id,
+            "transactionId": self.charge_id,
             "meterStop": self.charge_meter_value_current(**options),
             "idTag": options.pop("idTag", "-"),
             "reason": options.pop("stopReason", "Local")
@@ -209,35 +210,44 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    async def flow_charge(self, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, **options) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
         if not await self.action_authorize(**options):
+            self.charge_in_progress = False
             return False
         if not await self.action_charge_start(**options):
+            self.charge_in_progress = False
             return False
         if not await self.action_status_update("Preparing", **options):
+            self.charge_in_progress = False
             return False
         if not await self.action_status_update("Charging", **options):
+            self.charge_in_progress = False
             return False
-        for i in range(6):
-            await asyncio.sleep(15)
-            if not await self.action_meter_value(**options):
-                return False
-        await asyncio.sleep(5)
+        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+            self.charge_in_progress = False
+            return False
         if not await self.action_status_update("Finishing", **options):
+            self.charge_in_progress = False
             return False
         if not await self.action_charge_stop(**options):
+            self.charge_in_progress = False
             return False
         if not await self.action_status_update("Available", **options):
+            self.charge_in_progress = False
             return False
         self.logger.info(f"Flow {log_title} End")
+        self.charge_in_progress = False
         return True
+
+    async def flow_charge_ongoing_actions(self, **options) -> bool:
+        return await self.action_meter_value(**options)
 
     async def by_device_req_send(self, action, json_payload) -> typing.Any:
         result = asyncio.get_running_loop().create_future()
         req_id = str(uuid.uuid4())
-        req = f"""[2,"{req_id}","{action}",{json.dumps(json_payload)}]"""
+        req = f"""[{MessageTypes.Req.value},"{req_id}","{action}",{json.dumps(json_payload)}]"""
         self.__pending_by_device_reqs[req_id] = lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json)
         await self._ws.send(req)
         self.logger.debug(f"By Device Req ({action}):\n{req}")
@@ -260,7 +270,14 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
 
                 read_type = int(read_as_json[0])
                 if read_type == MessageTypes.Req.value:  # Received a request initiated from middleware
+                    if len(read_as_json) < 3:
+                        self.logger.warning(f"Device Read, Request, Invalid, Message:\n{read_raw}")
+                        continue
                     self.logger.debug(f"Device Read, Request, Message:\n{read_raw}")
+                    req_id = str(read_as_json[1])
+                    req_action = str(read_as_json[2]).lower()
+                    req_payload = read_as_json[3]
+                    await self.by_middleware_req(req_id, req_action, req_payload)
                 elif read_type == MessageTypes.Resp.value:  # Received a response from middleware for a request we sent to it previously
                     if len(read_as_json) < 2:
                         self.logger.warning(f"Device Read, Response, Invalid, Message:\n{read_raw}")
@@ -275,6 +292,67 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
                     self.logger.debug(f"Device Read, Type Unknown, Message:\n{read_raw}")
         except asyncio.CancelledError:
             return
+        pass
+
+    async def by_middleware_req(self, req_id: str, req_action: str, req_payload: typing.Any):
+        resp_payload = None
+        if req_action in map(lambda x: str(x).lower(), [
+            "ClearCache",
+            "ChangeAvailability",
+            "RemoteStartTransaction",
+            "RemoteStopTransaction",
+            "SetChargingProfile",
+            "ChangeConfiguration",
+            "UnlockConnector",
+            "UpdateFirmware",
+            "SendLocalList",
+            "CancelReservation",
+            "ReserveNow",
+            "Reset",
+        ]):
+            resp_payload = {
+                "status": "Accepted"
+            }
+        elif req_action == "GetConfiguration".lower():
+            resp_payload = {
+                "type": "device-simulator",
+                "server_address": self.server_address,
+                "identifier": self.deviceId,
+            }
+        elif req_action == "GetDiagnostics".lower():
+            resp_payload = {
+                "fileName": "fake_file_name.log"
+            }
+
+        if req_action == "RemoteStartTransaction".lower():
+            if not self.charge_can_start():
+                resp_payload["status"] = "Rejected"
+            else:
+                options = {
+                    "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
+                    "idTag": req_payload["idTag"] if "idTag" in req_payload else "-",
+                }
+                self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
+                asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
+
+        if req_action == "RemoteStopTransaction".lower():
+            if not self.charge_can_stop(req_payload["transactionId"] if "transactionId" in req_payload else 0):
+                resp_payload["status"] = "Rejected"
+            else:
+                asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
+
+        if req_action == "Reset".lower():
+            asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
+
+        if resp_payload is not None:
+            resp = f"""[{MessageTypes.Resp.value},"{req_id}",{json.dumps(resp_payload)}]"""
+            await self._ws.send(resp)
+            self.logger.debug(f"Device Read, Request, Responded:\n{resp}")
+        else:
+            self.logger.warning(f"Device Read, Request, Unknown or not supported: {req_action}")
+
+    async def flow_charge_stop(self):
+        self.charge_in_progress = False
         pass
 
     async def loop_interactive_custom(self):

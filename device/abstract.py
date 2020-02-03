@@ -12,6 +12,8 @@ class DeviceAbstract(abc.ABC):
         self.register_on_initialize = True
         self.deviceId = device_id
         self.name = ''
+        self.charge_in_progress = False
+        self.charge_id = -1
 
     @property
     @abc.abstractmethod
@@ -82,8 +84,24 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def flow_charge(self, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, **options) -> bool:
         pass
+
+    @abc.abstractmethod
+    async def flow_charge_ongoing_actions(self, **options) -> bool:
+        pass
+
+    async def flow_charge_ongoing_loop(self, auto_stop: bool, **options):
+        charge_loop_counter = 0
+        while self.charge_in_progress:
+            await asyncio.sleep(15)
+            charge_loop_counter += 1
+            if not await self.flow_charge_ongoing_actions(**options):
+                return False
+            if auto_stop and charge_loop_counter >= 5:
+                break
+        await asyncio.sleep(5)
+        return True
 
     @staticmethod
     def utcnow_iso() -> str:
@@ -92,3 +110,9 @@ class DeviceAbstract(abc.ABC):
     @abc.abstractmethod
     async def loop_interactive_custom(self):
         pass
+
+    def charge_can_start(self):
+        return not self.charge_in_progress
+
+    def charge_can_stop(self, req_id):
+        return self.charge_in_progress and self.charge_id == req_id
