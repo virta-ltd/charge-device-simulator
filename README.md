@@ -1,4 +1,11 @@
+![Docker Hub Image Release](https://github.com/virta-ltd/charge-device-simulator/workflows/Docker%20Hub%20Image%20Release/badge.svg?branch=master)  
+
 # Device Simulator
+
+## Docker Hub
+Latest version image: <b>virtaltd/charge-device-simulator:latest</b>  
+All tags: https://hub.docker.com/r/virtaltd/charge-device-simulator/tags
+
 ## How to use
 Please read the README.md file inside `how-to-use` folder
 
