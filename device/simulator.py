@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 import typing
 
 import aioconsole
@@ -29,11 +28,11 @@ class Simulator:
         self.name = ''
 
     async def loop_flow_frequent(self):
-        time = 0
+        time_loop = 0
         tasks: typing.Dict[str, asyncio.tasks.Task] = {}
         while not self.is_ended:
             await asyncio.sleep(1)
-            time += 1
+            time_loop += 1
 
             f_flow: Flows
             for f_flow in self.frequent_flows:
@@ -45,7 +44,7 @@ class Simulator:
                     f_options_delay_seconds = 60
                 if (
                         f_options.run_last_time < 0 or
-                        time - f_options.run_last_time >= f_options_delay_seconds
+                        time_loop - f_options.run_last_time >= f_options_delay_seconds
                 ) and (
                         f_options.count < 0 or
                         f_options.run_counter < f_options.count
@@ -58,13 +57,15 @@ class Simulator:
                             **self.flow_charge_options)
                     elif f_flow == Flows.Charge:
                         task_def = self.device.flow_charge(
-                            **self.flow_charge_options)
+                            True,
+                            **self.flow_charge_options
+                        )
                     if task_def is not None:
                         self.logger.info(
-                            f"Frequent Flow, Started, Flow: {f_flow}, Time: {time}")
+                            f"Frequent Flow, Started, Flow: {f_flow}, Time: {time_loop}")
                         tasks[f_flow.name] = asyncio.create_task(task_def)
                     f_options.run_counter += 1
-                    f_options.run_last_time = time
+                    f_options.run_last_time = time_loop
 
             if len(list(filter(
                     lambda x:
@@ -79,11 +80,11 @@ class Simulator:
                 break
         pass
 
-    def initialize(self):
+    async def initialize(self):
         self.device.on_error = self.on_error
         self.logger.info("Initialize")
-        while not self.device.initialize():
-            time.sleep(10)
+        while not await self.device.initialize():
+            await asyncio.sleep(10)
         pass
 
     async def lifecycle_start(self):
@@ -94,9 +95,9 @@ class Simulator:
             tasks.append(self.loop_flow_frequent())
         await asyncio.gather(*tasks)
 
-    def end(self):
+    async def end(self):
         self.is_ended = True
-        self.device.end()
+        await self.device.end()
         pass
 
     async def loop_interactive(self):
@@ -112,7 +113,7 @@ What should I do? (enter the number + enter)
             if input1 == "0":
                 return
             elif input1 == "1":
-                await self.device.flow_charge(**self.flow_charge_options)
+                await self.device.flow_charge(True, **self.flow_charge_options)
             elif input1 == "2":
                 await self.device.flow_heartbeat()
             elif input1 == "3":

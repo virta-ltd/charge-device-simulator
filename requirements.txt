@@ -1,4 +1,4 @@
-websocket-client
+websockets
 coloredlogs
 aioconsole
 pyyaml

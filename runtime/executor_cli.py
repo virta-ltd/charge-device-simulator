@@ -1,19 +1,18 @@
-import asyncio
 import argparse
-from typing import Any, Dict, Optional
-
-import yaml
+from typing import Any, Dict
 
 import device
+import yaml
+
 from .config_parser import ConfigParser
 
 
-class ExecutorCli():
+class ExecutorCli:
     simulator: device.Simulator = None
     on_error = []
 
     @staticmethod
-    def __any_constructor(loader, tag_suffix, node):
+    def __any_constructor(loader, node):
         if isinstance(node, yaml.MappingNode):
             return loader.construct_mapping(node)
         if isinstance(node, yaml.SequenceNode):
@@ -49,9 +48,8 @@ class ExecutorCli():
             filter(lambda x: x['name'] == args['simulation'], config['simulations']))[0]
         config_device = list(filter(
             lambda x: x['name'] == config_simulation['device_name'], config['devices']))[0]
-        config_parser = ConfigParser()
-        self.simulator = config_parser.parse_simulator(
-            config_parser.parse_device(config_device),
+        self.simulator = ConfigParser.parse_simulator(
+            ConfigParser.parse_device(config_device),
             config_simulation
         )
         self.simulator.name = args['simulation']
@@ -62,6 +60,6 @@ class ExecutorCli():
     async def execute(self):
         if self.simulator is None:
             return
-        self.simulator.initialize()
+        await self.simulator.initialize()
         await self.simulator.lifecycle_start()
-        self.simulator.end()
+        await self.simulator.end()

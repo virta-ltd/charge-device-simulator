@@ -1,10 +1,12 @@
+from typing import Optional
+
 import device
-from typing import Dict, Any, Optional
 
 
-class ConfigParser():
+class ConfigParser:
 
-    def parse_simulator(self, device_target: device.DeviceAbstract, config) -> device.Simulator:
+    @staticmethod
+    def parse_simulator(device_target: device.DeviceAbstract, config) -> Optional[device.Simulator]:
         if device_target is None:
             return None
         if 'error_exit' in config:
@@ -22,7 +24,8 @@ class ConfigParser():
         result.is_interactive = config['is_interactive']
         return result
 
-    def parse_device(self, config) -> device.DeviceAbstract:
+    @staticmethod
+    def parse_device(config) -> device.DeviceAbstract:
         result: Optional[device.DeviceAbstract] = None
         if config['type'] == 'ocpp-j':
             dev1 = device.DeviceOcppJ(config['spec_identifier'])

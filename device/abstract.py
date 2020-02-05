@@ -12,6 +12,8 @@ class DeviceAbstract(abc.ABC):
         self.register_on_initialize = True
         self.deviceId = device_id
         self.name = ''
+        self.charge_in_progress = False
+        self.charge_id = -1
 
     @property
     @abc.abstractmethod
@@ -19,21 +21,21 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def initialize(self) -> bool:
+    async def initialize(self) -> bool:
         pass
 
     @abc.abstractmethod
-    def end(self):
+    async def end(self):
         pass
 
-    def re_initialize(self):
-        self.end()
-        self.initialize()
+    async def re_initialize(self):
+        await self.end()
+        await self.initialize()
         pass
 
     error_exit = True
 
-    def handle_error(self, desc) -> bool:
+    async def handle_error(self, desc) -> bool:
         self.logger.error(desc)
         for event in self.on_error:
             event(desc)
@@ -42,35 +44,35 @@ class DeviceAbstract(abc.ABC):
             loop.call_soon_threadsafe(loop.stop)
             sys.exit(1)
         else:
-            self.re_initialize()
+            return False
         pass
 
     @abc.abstractmethod
-    def action_register(self) -> bool:
+    async def action_register(self) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_heart_beat(self) -> bool:
+    async def action_heart_beat(self) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_status_update(self, status, **options) -> bool:
+    async def action_status_update(self, status, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, **options) -> bool:
         pass
 
     @abc.abstractmethod
-    def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, **options) -> bool:
         pass
 
     @abc.abstractmethod
@@ -82,8 +84,24 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def flow_charge(self, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, **options) -> bool:
         pass
+
+    @abc.abstractmethod
+    async def flow_charge_ongoing_actions(self, **options) -> bool:
+        pass
+
+    async def flow_charge_ongoing_loop(self, auto_stop: bool, **options):
+        charge_loop_counter = 0
+        while self.charge_in_progress:
+            await asyncio.sleep(15)
+            charge_loop_counter += 1
+            if not await self.flow_charge_ongoing_actions(**options):
+                return False
+            if auto_stop and charge_loop_counter >= 5:
+                break
+        await asyncio.sleep(5)
+        return True
 
     @staticmethod
     def utcnow_iso() -> str:
@@ -92,3 +110,9 @@ class DeviceAbstract(abc.ABC):
     @abc.abstractmethod
     async def loop_interactive_custom(self):
         pass
+
+    def charge_can_start(self):
+        return not self.charge_in_progress
+
+    def charge_can_stop(self, req_id):
+        return self.charge_in_progress and self.charge_id == req_id
