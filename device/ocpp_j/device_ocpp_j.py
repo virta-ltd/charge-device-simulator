@@ -24,6 +24,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     def __init__(self, device_id):
         super().__init__(device_id)
         self.flow_frequent_delay_seconds = 30
+        self.protocols = ['ocpp1.6', 'ocpp1.5']
         self.spec_meterSerialNumber = None
         self.spec_meterType = None
         self.spec_imsi = None
@@ -42,14 +43,15 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             logging.getLogger('websockets.client').setLevel(logging.WARNING)
             logging.getLogger('websockets.server').setLevel(logging.WARNING)
             logging.getLogger('websockets.protocol').setLevel(logging.WARNING)
+            self.logger.info(f"Trying to connect with protocols: {json.dumps(self.protocols)}")
             self._ws = await websockets.connect(
                 f"{self.server_address}/{self.deviceId}",
-                subprotocols=[websockets.Subprotocol('ocpp1.6')]
+                subprotocols=[websockets.Subprotocol(p) for p in self.protocols]
             )
+            self.logger.info(f"Connected with protocol: {self._ws.subprotocol}")
             self.__loop_internal_task = asyncio.create_task(self.__loop_internal())
 
             await asyncio.sleep(1)
-            self.logger.info("Connected")
 
             if self.register_on_initialize:
                 await self.action_register()

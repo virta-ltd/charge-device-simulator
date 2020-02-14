@@ -30,6 +30,8 @@ class ConfigParser:
         if config['type'] == 'ocpp-j':
             dev1 = device.DeviceOcppJ(config['spec_identifier'])
             dev1.server_address = config['server_address']
+            if 'protocols' in config:
+                dev1.protocols = config['protocols']
             if 'spec_chargeBoxSerialNumber' in config:
                 dev1.spec_chargeBoxSerialNumber = config['spec_chargeBoxSerialNumber']
             if 'spec_chargePointModel' in config:

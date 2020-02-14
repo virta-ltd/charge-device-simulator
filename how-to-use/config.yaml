@@ -22,6 +22,10 @@ simulations:
 devices:
   - type: ocpp-j # Device protocol (supported values for now: ocpp-j, ensto)
     name: test-ocpp-j-1 # Name of the device
+    protocols: [ # OCPP protocols the device will support (first supported by the server will be chosen)
+      'ocpp1.6',
+      'ocpp1.5'
+    ]
     server_address: "ws://sample-server.com:80" # Target ocpp-j server endpoint and port
     register_on_initialize: true # Send boot notification after connection
     spec_identifier: Sample_Device_0001 # OCPP-J property, identifier
