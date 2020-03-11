@@ -58,8 +58,11 @@ class ExecutorCli:
         pass
 
     async def execute(self):
-        if self.simulator is None:
+        if self.simulator is None or self.simulator.device is None:
             return
-        await self.simulator.initialize()
-        await self.simulator.lifecycle_start()
-        await self.simulator.end()
+        try:
+            await self.simulator.initialize()
+            await self.simulator.lifecycle_start()
+            await self.simulator.end()
+        except Exception as e:
+            self.simulator.device.handle_error(f"Unexpected Error: {str(e)}", device.ErrorReasons.UnknownException)

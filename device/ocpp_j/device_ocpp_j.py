@@ -12,6 +12,7 @@ import device.abstract
 import websockets
 from device import utility
 from device.ocpp_j.message_types import MessageTypes
+from device.error_reasons import ErrorReasons
 
 
 class DeviceOcppJ(device.abstract.DeviceAbstract):
@@ -58,10 +59,10 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             await self.action_heart_beat()
             return True
         except ValueError as err:
-            await self.handle_error(str(err))
+            await self.handle_error(str(err), ErrorReasons.InvalidResponse)
             return False
         except:
-            await self.handle_error(str(sys.exc_info()[0]))
+            await self.handle_error(str(sys.exc_info()[0]), ErrorReasons.InvalidResponse)
             return False
 
     async def end(self):
@@ -87,7 +88,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -121,7 +122,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -142,7 +143,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.charge_id = resp_json[2]['transactionId']
         self.charge_in_progress = True
@@ -151,9 +152,9 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
 
     def charge_meter_value_current(self, **options):
         return math.floor(self.charge_meter_start + (
-                (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
-                * options.pop("chargedKwhPerMinute", 1)
-                * 1000
+            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+            * options.pop("chargedKwhPerMinute", 1)
+            * 1000
         ))
 
     async def action_meter_value(self, **options) -> bool:
@@ -191,7 +192,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed")
+            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True

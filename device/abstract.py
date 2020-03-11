@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import logging
 import sys
+from device.error_reasons import ErrorReasons
 
 
 class DeviceAbstract(abc.ABC):
@@ -28,17 +29,16 @@ class DeviceAbstract(abc.ABC):
     async def end(self):
         pass
 
-    async def re_initialize(self):
+    async def re_initialize(self) -> bool:
         await self.end()
-        await self.initialize()
-        pass
+        return await self.initialize()
 
     error_exit = True
 
-    async def handle_error(self, desc) -> bool:
+    async def handle_error(self, desc, reason: ErrorReasons) -> bool:
         self.logger.error(desc)
         for event in self.on_error:
-            event(desc)
+            await event(desc, reason)
         if self.error_exit:
             loop = asyncio.get_event_loop()
             loop.call_soon_threadsafe(loop.stop)

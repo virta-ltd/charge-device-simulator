@@ -7,6 +7,7 @@ import aioconsole
 from .abstract import DeviceAbstract
 from .flows import Flows
 from .frequent_flow_options import FrequentFlowOptions
+from device.error_reasons import ErrorReasons
 
 
 class Simulator:
@@ -63,7 +64,7 @@ class Simulator:
                     if task_def is not None:
                         self.logger.info(
                             f"Frequent Flow, Started, Flow: {f_flow}, Time: {time_loop}")
-                        tasks[f_flow.name] = asyncio.create_task(task_def)
+                        tasks[f_flow.name] = asyncio.create_task(self.task_start(task_def))
                     f_options.run_counter += 1
                     f_options.run_last_time = time_loop
 
@@ -80,11 +81,29 @@ class Simulator:
                 break
         pass
 
+    async def task_start(self, task_def):
+        try:
+            await task_def
+        except Exception as e:
+            await self.device.handle_error(f"Unexpected Error: {str(e)}", ErrorReasons.UnknownException)
+
     async def initialize(self):
         self.device.on_error = self.on_error
+        self.device.on_error.append(self.device_on_error)
         self.logger.info("Initialize")
         while not await self.device.initialize():
             await asyncio.sleep(10)
+        pass
+
+    async def re_initialize(self):
+        self.logger.info("Re-Initialize")
+        while not await self.device.re_initialize():
+            await asyncio.sleep(10)
+        pass
+
+    async def device_on_error(self, desc, reason: ErrorReasons):
+        if reason == ErrorReasons.UnknownException:
+            await self.re_initialize()
         pass
 
     async def lifecycle_start(self):
