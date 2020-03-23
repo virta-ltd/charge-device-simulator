@@ -34,6 +34,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         self.spec_chargeBoxSerialNumber = None
         self.spec_chargePointModel = None
         self.spec_chargePointVendor = None
+        self.spec_chargePointSerialNumber = None
 
     @property
     def logger(self) -> logging:
@@ -75,17 +76,25 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
     async def action_register(self) -> bool:
         action = "BootNotification"
         self.logger.info(f"Action {action} Start")
-        json_payload = {
-            'chargePointVendor': self.spec_chargePointVendor,
-            'chargePointModel': self.spec_chargePointModel,
-            'chargeBoxSerialNumber': self.spec_chargeBoxSerialNumber,
-            'firmwareVersion': self.spec_firmwareVersion,
-            'iccid': self.spec_iccid,
-            'imsi': self.spec_imsi,
-            'meterType': self.spec_meterType,
-            'meterSerialNumber': self.spec_meterSerialNumber,
-            'chargePointSerialNumber': "Not set",
-        }
+        json_payload = {}
+        if self.spec_chargePointVendor is not None:
+            json_payload['chargePointVendor'] = self.spec_chargePointVendor
+        if self.spec_chargePointModel is not None:
+            json_payload['chargePointModel'] = self.spec_chargePointModel
+        if self.spec_chargeBoxSerialNumber is not None:
+            json_payload['chargeBoxSerialNumber'] = self.spec_chargeBoxSerialNumber
+        if self.spec_firmwareVersion is not None:
+            json_payload['firmwareVersion'] = self.spec_firmwareVersion
+        if self.spec_iccid is not None:
+            json_payload['iccid'] = self.spec_iccid
+        if self.spec_imsi is not None:
+            json_payload['imsi'] = self.spec_imsi
+        if self.spec_meterType is not None:
+            json_payload['meterType'] = self.spec_meterType
+        if self.spec_meterSerialNumber is not None:
+            json_payload['meterSerialNumber'] = self.spec_meterSerialNumber
+        if self.spec_chargePointSerialNumber is not None:
+            json_payload['chargePointSerialNumber'] = self.spec_chargePointSerialNumber
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
