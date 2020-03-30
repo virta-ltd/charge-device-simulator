@@ -22,6 +22,8 @@ class ConfigParser:
                     ff['count']
                 )
         result.is_interactive = config['is_interactive']
+        if 'name' in config:
+            result.name = config['name']
         return result
 
     @staticmethod
@@ -29,7 +31,8 @@ class ConfigParser:
         result: Optional[device.DeviceAbstract] = None
         if config['type'] == 'ocpp-j':
             dev1 = device.DeviceOcppJ(config['spec_identifier'])
-            dev1.server_address = config['server_address']
+            if 'server_address' in config:
+                dev1.server_address = config['server_address']
             if 'protocols' in config:
                 dev1.protocols = config['protocols']
             if 'spec_chargeBoxSerialNumber' in config:
@@ -51,8 +54,10 @@ class ConfigParser:
             result = dev1
         elif config['type'] == 'ensto':
             dev1 = device.DeviceEnsto(config['spec_identifier'])
-            dev1.server_host = config['server_host']
-            dev1.server_port = config['server_port']
+            if 'server_host' in config:
+                dev1.server_host = config['server_host']
+            if 'server_port' in config:
+                dev1.server_port = config['server_port']
             if 'spec_vendor' in config:
                 dev1.spec_vendor = config['spec_vendor']
             if 'spec_model' in config:
@@ -61,6 +66,8 @@ class ConfigParser:
                 dev1.spec_sw = config['spec_sw']
             result = dev1
 
+        if 'name' in config:
+            result.name = config['name']
         if 'register_on_initialize' in config:
             result.register_on_initialize = config['register_on_initialize']
 
