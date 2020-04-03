@@ -76,6 +76,10 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
+    async def action_data_transfer(self, **options) -> bool:
+        pass
+
+    @abc.abstractmethod
     async def flow_heartbeat(self) -> bool:
         pass
 

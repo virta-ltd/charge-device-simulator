@@ -187,6 +187,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             return False
         self.logger.info(f"Action {action} End")
         return True
+    
+    async def action_data_transfer(self, **options) -> bool:
+        return True
 
     async def flow_heartbeat(self) -> bool:
         log_title = self.flow_heartbeat.__name__

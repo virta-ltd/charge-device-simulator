@@ -37,6 +37,8 @@ class ConfigParser:
                 dev1.protocols = config['protocols']
             if 'spec_chargeBoxSerialNumber' in config:
                 dev1.spec_chargeBoxSerialNumber = config['spec_chargeBoxSerialNumber']
+            if 'spec_chargePointSerialNumber' in config:
+                dev1.spec_chargePointSerialNumber = config['spec_chargePointSerialNumber']
             if 'spec_chargePointModel' in config:
                 dev1.spec_chargePointModel = config['spec_chargePointModel']
             if 'spec_chargePointVendor' in config:

@@ -136,6 +136,16 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
+    async def action_data_transfer(self, **options) -> bool:
+        action = "DataTransfer"
+        self.logger.info(f"Action {action} Start")
+        json_payload = options
+        resp_json = await self.by_device_req_send(action, json_payload)
+        if resp_json is None:
+            return False
+        self.logger.info(f"Action {action} End")
+        return True
+
     charge_start_time = datetime.datetime.utcnow()
     charge_meter_start = 1000
 
