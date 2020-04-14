@@ -331,6 +331,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             "CancelReservation",
             "ReserveNow",
             "Reset",
+            "DataTransfer",
         ]):
             resp_payload = {
                 "status": "Accepted"
