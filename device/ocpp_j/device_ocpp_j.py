@@ -338,9 +338,11 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             }
         elif req_action == "GetConfiguration".lower():
             resp_payload = {
-                "type": "device-simulator",
-                "server_address": self.server_address,
-                "identifier": self.deviceId,
+                "configurationKey": [
+                    {"key": "type", "value": "device-simulator", "readonly": "true"},
+                    {"key": "server_address", "value": self.server_address, "readonly": "true"},
+                    {"key": "identifier", "value": self.deviceId, "readonly": "false"},
+                ]
             }
         elif req_action == "GetDiagnostics".lower():
             resp_payload = {
