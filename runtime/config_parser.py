@@ -72,5 +72,9 @@ class ConfigParser:
             result.name = config['name']
         if 'register_on_initialize' in config:
             result.register_on_initialize = config['register_on_initialize']
+        if 'error_exit' in config:
+            result.error_exit = config['error_exit']
+        if 'response_timeout_seconds' in config:
+            result.response_timeout_seconds = config['response_timeout_seconds']
 
         return result

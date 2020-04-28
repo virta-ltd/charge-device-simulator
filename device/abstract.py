@@ -15,6 +15,7 @@ class DeviceAbstract(abc.ABC):
         self.name = ''
         self.charge_in_progress = False
         self.charge_id = -1
+        self.response_timeout_seconds = 10
 
     @property
     @abc.abstractmethod
@@ -46,6 +47,9 @@ class DeviceAbstract(abc.ABC):
         else:
             return False
         pass
+
+    def by_device_req_resp_timeout(self) -> str:
+        return f'"response timeout, {self.response_timeout_seconds} seconds passed"'
 
     @abc.abstractmethod
     async def action_register(self) -> bool:

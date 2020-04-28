@@ -89,9 +89,11 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             'time': 1,
         }
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or 'chk' not in resp_json or 'time' not in resp_json:
+        if resp_json is None or 'chk' not in resp_json:
             await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}", ErrorReasons.InvalidResponse)
             return False
+        if 'time' not in resp_json:
+            self.logger.warning(f"Action {action}, `time` was not found in response")
         self.logger.info(f"Action {action} End")
         return True
 
@@ -165,7 +167,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
-            await self.handle_error(f"Action {action} (Response Failed:\n{json.dumps(resp_json)}", ErrorReasons.InvalidResponse) / 1000
+            await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -236,7 +238,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         return True
 
     async def flow_charge_ongoing_actions(self, **options) -> bool:
-        return await self.action_meter_value(**options) and await self.action_status_update("1", **options)
+        if not await self.action_meter_value(**options):
+            self.logger.warning(f"Flow charge, meter values not success")
+        return await self.action_status_update("1", **options)
 
     async def by_device_req_send(self, action, json_payload, valid_ids: typing.Sequence = None):
         result = asyncio.get_running_loop().create_future()
@@ -246,7 +250,10 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.__socketWriter.write(req.encode())
         await self.__socketWriter.drain()
         self.logger.debug(f"By Device Req ({action}):\n{req}")
-        return await result
+        try:
+            return await asyncio.wait_for(result, timeout=self.response_timeout_seconds)
+        except asyncio.TimeoutError:
+            return self.by_device_req_resp_timeout()
 
     def __socket_message(self, payload_dict) -> str:
         req = f"""imei={self.deviceId}"""

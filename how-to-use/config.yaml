@@ -5,7 +5,7 @@ simulations:
     flow_charge_options: # Options passing to charge start when a charge flow gets started
       idTag: "FAKE_RFID" # The idTag to be used for authorization
     is_interactive: false # If true, you can ask for different flows and commands while the simulation is running using your keyboard
-    error_exit: false # If true (default), the app will crash if a response is not succeeded
+    error_exit: false # If true (default), the app will crash if a response is not succeeded (will be set on target device)
     frequent_flow_enabled: true # If true, flows defined below will be run frequently using defined options
     frequent_flows: # Defined frequent flows. You can choose to run any number of them (add more or delete not wanted ones)
       - flow: heartbeat # A flow of sending heartbeat
@@ -28,6 +28,8 @@ devices:
     ]
     server_address: "ws://sample-server.com:80" # Target ocpp-j server endpoint and port
     register_on_initialize: true # Send boot notification after connection
+    error_exit: true # If true (default), the app will crash if a response is not succeeded
+    response_timeout_seconds: 30 # Timeout for request responses, default is 10 seconds
     spec_identifier: Sample_Device_0001 # OCPP-J property, identifier
     spec_chargeBoxSerialNumber: 1234 # OCPP-J property
     spec_chargePointModel: Model_X # OCPP-J property
@@ -43,6 +45,8 @@ devices:
     server_host: "sample-server.com" # Sample Server
     server_port: 3000
     register_on_initialize: true
+    error_exit: true # If true (default), the app will crash if a response is not succeeded
+    response_timeout_seconds: 10 # Timeout for request responses, default is 10 seconds
     spec_identifier: device_simulator_test_ensto_1
     spec_vendor: Vendor_X
     spec_model: Model_X

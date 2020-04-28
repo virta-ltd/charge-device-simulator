@@ -273,7 +273,10 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         self.__pending_by_device_reqs[req_id] = lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json)
         await self._ws.send(req)
         self.logger.debug(f"By Device Req ({action}):\n{req}")
-        return await result
+        try:
+            return await asyncio.wait_for(result, timeout=self.response_timeout_seconds)
+        except asyncio.TimeoutError:
+            return self.by_device_req_resp_timeout()
 
     def __by_device_req_resp_ready(self, future: asyncio.Future, action, resp_json):
         resp = json.dumps(resp_json)
