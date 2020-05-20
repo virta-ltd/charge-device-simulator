@@ -37,7 +37,7 @@ class DeviceAbstract(abc.ABC):
     error_exit = True
 
     async def handle_error(self, desc, reason: ErrorReasons) -> bool:
-        self.logger.error(desc)
+        self.logger.exception(desc)
         for event in self.on_error:
             await event(desc, reason)
         if self.error_exit:
