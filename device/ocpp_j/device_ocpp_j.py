@@ -111,11 +111,14 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         return True
 
     async def action_status_update(self, status, **options) -> bool:
+        return await self.action_status_update_ocpp(status, "NoError", **options)
+
+    async def action_status_update_ocpp(self, status, errorCode, **options) -> bool:
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
             "connectorId": options.pop("connectorId", 1),
-            "errorCode": "NoError",
+            "errorCode": errorCode,
             "status": status
         }
         if await self.by_device_req_send(action, json_payload) is None:
@@ -398,5 +401,6 @@ What should I do? (enter the number + enter)
                 await self.action_heart_beat()
             elif input1 == "2":
                 input1 = await aioconsole.ainput("Which status?\n")
-                await self.action_status_update(input1)
+                input2 = await aioconsole.ainput("Which errorCode?\n")
+                await self.action_status_update_ocpp(input1, input2)
         pass
