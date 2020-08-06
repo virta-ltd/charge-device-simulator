@@ -136,7 +136,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.charge_meter_start = options.pop("meterStart", self.charge_meter_start)
         json_payload = {
             'id': 5,
-            "rfid": options.pop("idTag", "-"),
+            "idtag": options.pop("idTag", "-"),
             "chg": 2,
             "out": options.pop("connectorId", 1),
         }
@@ -177,7 +177,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 6,
-            "rfid": options.pop("idTag", "-"),
+            "idtag": options.pop("idTag", "-"),
             "chg": 0,
             "out": options.pop("connectorId", 1),
             "kwh": (self.charge_meter_value_current(**options) - self.charge_meter_start) / 1000,
@@ -189,7 +189,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             return False
         self.logger.info(f"Action {action} End")
         return True
-    
+
     async def action_data_transfer(self, **options) -> bool:
         return True
 
@@ -212,9 +212,10 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def flow_charge(self, auto_stop: bool, **options) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not await self.action_authorize(**options):
-            self.charge_in_progress = False
-            return False
+        if not options.pop("is_remote_started", False):
+            if not await self.action_authorize(**options):
+                self.charge_in_progress = False
+                return False
         if not await self.action_status_update("1", **options):
             self.charge_in_progress = False
             return False
@@ -320,6 +321,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                 else:
                     options = {
                         "idTag": req_payload["idtag"] if "idtag" in req_payload else "-",
+                        "is_remote_started": True,
                     }
                     self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
                     asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
