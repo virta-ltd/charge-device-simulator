@@ -8,6 +8,7 @@ from .abstract import DeviceAbstract
 from .flows import Flows
 from .frequent_flow_options import FrequentFlowOptions
 from device.error_reasons import ErrorReasons
+from runtime.error_message import ErrorMessage
 
 
 class Simulator:
@@ -85,7 +86,7 @@ class Simulator:
         try:
             await task_def
         except Exception as e:
-            await self.device.handle_error(f"Unexpected Error: {str(e)}", ErrorReasons.UnknownException)
+            await self.device.handle_error(ErrorMessage(e).get(), ErrorReasons.UnknownException)
 
     async def initialize(self):
         self.device.on_error = self.on_error

@@ -5,6 +5,7 @@ import device
 
 from .config_parser import ConfigParser
 from .config_file_reader import ConfigFileReader
+from runtime.error_message import ErrorMessage
 
 
 class ExecutorCli:
@@ -36,4 +37,4 @@ class ExecutorCli:
             await self.simulator.lifecycle_start()
             await self.simulator.end()
         except Exception as e:
-            self.simulator.device.handle_error(f"Unexpected Error: {str(e)}", device.ErrorReasons.UnknownException)
+            self.simulator.device.handle_error(ErrorMessage(e).get(), device.ErrorReasons.UnknownException)

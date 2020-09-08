@@ -13,6 +13,7 @@ import websockets
 from device import utility
 from device.ocpp_j.message_types import MessageTypes
 from device.error_reasons import ErrorReasons
+from runtime.error_message import ErrorMessage
 
 
 class DeviceOcppJ(device.abstract.DeviceAbstract):
@@ -60,10 +61,10 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             await self.action_heart_beat()
             return True
         except ValueError as err:
-            await self.handle_error(str(err), ErrorReasons.InvalidResponse)
+            await self.handle_error(ErrorMessage(err).get(), ErrorReasons.InvalidResponse)
             return False
         except:
-            await self.handle_error(str(sys.exc_info()[0]), ErrorReasons.InvalidResponse)
+            await self.handle_error(ErrorMessage(sys.exc_info()[0]).get(), ErrorReasons.InvalidResponse)
             return False
 
     async def end(self):
