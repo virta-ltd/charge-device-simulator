@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import logging
 import sys
+import os
 from device.error_reasons import ErrorReasons
 
 
@@ -15,7 +16,8 @@ class DeviceAbstract(abc.ABC):
         self.name = ''
         self.charge_in_progress = False
         self.charge_id = -1
-        self.response_timeout_seconds = 10
+        envKey = 'RESPONSE_TIMEOUT_SECONDS'
+        self.response_timeout_seconds = int(os.environ[envKey]) if envKey in os.environ else 10
 
     @property
     @abc.abstractmethod
