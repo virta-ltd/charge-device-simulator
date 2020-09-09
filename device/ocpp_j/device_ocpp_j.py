@@ -8,18 +8,19 @@ import typing
 import uuid
 
 import aioconsole
-import device.abstract
 import websockets
+
+import device.abstract
 from device import utility
-from device.ocpp_j.message_types import MessageTypes
 from device.error_reasons import ErrorReasons
+from device.ocpp_j.message_types import MessageTypes
 from runtime.error_message import ErrorMessage
 
 
 class DeviceOcppJ(device.abstract.DeviceAbstract):
     server_address = ""
     __logger = logging.getLogger(__name__)
-    _ws = None
+    _ws: websockets.WebSocketClientProtocol = None
     __loop_internal_task: asyncio.Task = None
     __pending_by_device_reqs: typing.Dict[str, typing.Callable[[typing.Any], None]] = {}
 
@@ -53,6 +54,7 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
             )
             self.logger.info(f"Connected with protocol: {self._ws.subprotocol}")
             self.__loop_internal_task = asyncio.create_task(self.__loop_internal())
+            self.__ws_close_task = asyncio.create_task(self.__ws_close_task())
 
             await asyncio.sleep(1)
 
@@ -63,15 +65,26 @@ class DeviceOcppJ(device.abstract.DeviceAbstract):
         except ValueError as err:
             await self.handle_error(ErrorMessage(err).get(), ErrorReasons.InvalidResponse)
             return False
-        except:
-            await self.handle_error(ErrorMessage(sys.exc_info()[0]).get(), ErrorReasons.InvalidResponse)
+        except BaseException as err:
+            await self.handle_error(ErrorMessage(err).get(), ErrorReasons.InvalidResponse)
             return False
 
     async def end(self):
         if self.__loop_internal_task is not None:
             self.__loop_internal_task.cancel()
+        if self.__ws_close_task is not None:
+            self.__ws_close_task.cancel()
         if self._ws is not None:
             await self._ws.close()
+        pass
+
+    async def __ws_close_task(self):
+        await self._ws.wait_closed()
+        await self.handle_error({
+            "message": "Websocket connection closed",
+            "code": self._ws.close_code,
+            "reason": self._ws.close_reason
+        }, ErrorReasons.ConnectionError)
         pass
 
     async def action_register(self) -> bool:

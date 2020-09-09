@@ -37,4 +37,4 @@ class ExecutorCli:
             await self.simulator.lifecycle_start()
             await self.simulator.end()
         except Exception as e:
-            self.simulator.device.handle_error(ErrorMessage(e).get(), device.ErrorReasons.UnknownException)
+            await self.simulator.device.handle_error(ErrorMessage(e).get(), device.ErrorReasons.UnknownException)

@@ -8,6 +8,7 @@ import typing
 from urllib import parse
 
 import aioconsole
+
 import device.abstract
 from device import utility
 from device.ensto.pending_req import PendingReq
@@ -52,8 +53,8 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         except ValueError as err:
             await self.handle_error(ErrorMessage(err).get(), ErrorReasons.InvalidResponse)
             return False
-        except:
-            await self.handle_error(ErrorMessage(sys.exc_info()[0]).get(), ErrorReasons.InvalidResponse)
+        except BaseException as err:
+            await self.handle_error(ErrorMessage(err).get(), ErrorReasons.InvalidResponse)
             return False
 
     async def end(self):
