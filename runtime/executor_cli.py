@@ -1,15 +1,14 @@
 import argparse
 from typing import Any, Dict
 
-import device
+from device import ErrorReasons, Simulator
+from model import ErrorMessage
 
-from .config_parser import ConfigParser
 from .config_file_reader import ConfigFileReader
-from runtime.error_message import ErrorMessage
 
 
 class ExecutorCli:
-    simulator: device.Simulator = None
+    simulator: Simulator = None
     on_error = []
 
     def initialize(self, args=None):
@@ -37,4 +36,4 @@ class ExecutorCli:
             await self.simulator.lifecycle_start()
             await self.simulator.end()
         except Exception as e:
-            await self.simulator.device.handle_error(ErrorMessage(e).get(), device.ErrorReasons.UnknownException)
+            await self.simulator.device.handle_error(ErrorMessage(e).get(), ErrorReasons.UnknownException)

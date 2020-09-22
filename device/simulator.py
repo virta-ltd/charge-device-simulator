@@ -8,7 +8,7 @@ from .abstract import DeviceAbstract
 from .flows import Flows
 from .frequent_flow_options import FrequentFlowOptions
 from device.error_reasons import ErrorReasons
-from runtime.error_message import ErrorMessage
+from model.error_message import ErrorMessage
 
 
 class Simulator:

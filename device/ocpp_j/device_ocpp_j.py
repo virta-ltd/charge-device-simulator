@@ -3,21 +3,20 @@ import datetime
 import json
 import logging
 import math
-import sys
 import typing
 import uuid
 
 import aioconsole
 import websockets
 
-import device.abstract
 from device import utility
+from device.abstract import DeviceAbstract
 from device.error_reasons import ErrorReasons
 from device.ocpp_j.message_types import MessageTypes
-from runtime.error_message import ErrorMessage
+from model.error_message import ErrorMessage
 
 
-class DeviceOcppJ(device.abstract.DeviceAbstract):
+class DeviceOcppJ(DeviceAbstract):
     server_address = ""
     __logger = logging.getLogger(__name__)
     _ws: websockets.WebSocketClientProtocol = None

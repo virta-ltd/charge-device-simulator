@@ -13,7 +13,7 @@ import device.abstract
 from device import utility
 from device.ensto.pending_req import PendingReq
 from device.error_reasons import ErrorReasons
-from runtime.error_message import ErrorMessage
+from model.error_message import ErrorMessage
 
 
 # noinspection DuplicatedCode
