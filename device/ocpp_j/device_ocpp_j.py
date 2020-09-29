@@ -81,8 +81,8 @@ class DeviceOcppJ(DeviceAbstract):
         await self._ws.wait_closed()
         await self.handle_error({
             "message": "Websocket connection closed",
-            "code": self._ws.close_code,
-            "reason": self._ws.close_reason
+            "code": getattr(self._ws, 'close_code', ''),
+            "reason": getattr(self._ws, 'close_reason', '')
         }, ErrorReasons.ConnectionError)
         pass
 

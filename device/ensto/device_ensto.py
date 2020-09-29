@@ -24,7 +24,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     __loop_internal_task: asyncio.Task = None
     __socketWriter: asyncio.StreamWriter = None
     __socketReader: asyncio.StreamReader = None
-    __pending_by_device_reqs: typing.Dict[str, PendingReq] = {}
+    __pending_by_device_reqs: typing.Dict[str, typing.List[PendingReq]] = {}
 
     def __init__(self, device_id):
         super().__init__(device_id)
@@ -249,7 +249,11 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         result = asyncio.get_running_loop().create_future()
         req_id = str(json_payload['id'])
         req = self.__socket_message(json_payload)
-        self.__pending_by_device_reqs[req_id] = PendingReq(valid_ids, lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json))
+        pendingList = self.__pending_by_device_reqs.get(req_id, None)
+        if pendingList is None:
+            pendingList = list()
+            self.__pending_by_device_reqs[req_id] = pendingList
+        pendingList.append(PendingReq(valid_ids, lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json)))
         self.__socketWriter.write(req.encode())
         await self.__socketWriter.drain()
         self.logger.debug(f"By Device Req ({action}):\n{req}")
@@ -284,14 +288,20 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                 read_id = str(read_as_json['id'])
 
                 # Find possible pending req by its id (dict)
-                pending_req = self.__pending_by_device_reqs.pop(read_id, None)
+                pending_req = None
+                pending_list = self.__pending_by_device_reqs.get(read_id, None)
+                if pending_list is not None and len(pending_list) > 0:
+                    pending_req = pending_list.pop()
                 # If not found, try finding in valid_ids
                 if pending_req is None:
-                    key = next(
-                        (item_key for item_key, item_value in self.__pending_by_device_reqs.items() if read_id in item_value.valid_ids),
-                        None
-                    )
-                    pending_req = self.__pending_by_device_reqs.pop(key, None)
+                    for fe_req_id, fe_pending_list in self.__pending_by_device_reqs.items():
+                        for fe_pending in fe_pending_list:
+                            if read_id in fe_pending.valid_ids:
+                                pending_req = fe_pending
+                                break
+                        if pending_req is not None:
+                            fe_pending_list.remove(pending_req)
+                            break
 
                 if pending_req is not None:  # Received a response from middleware for a request we sent to it previously
                     pending_req.resp_callable(read_as_json)
