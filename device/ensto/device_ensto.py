@@ -277,14 +277,18 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         future.set_result(resp_json)
         pass
 
+    def __raw_to_json(self, raw: str) -> typing.Any:
+        result = {}
+        for term in raw.split('&'):
+            term_break = term.split('=')
+            result[term_break[0]] = term_break[1] if len(term_break) > 1 else None
+        return result
+
     async def __loop_internal(self):
         try:
             while True:
                 read_raw = (await self.__socketReader.readline()).decode()
-                read_as_json = {}
-                for term in read_raw.split('&'):
-                    term_break = term.split('=')
-                    read_as_json[term_break[0]] = term_break[1] if len(term_break) > 1 else None
+                read_as_json = self.__raw_to_json(read_raw)
                 read_id = str(read_as_json['id'])
 
                 # Find possible pending req by its id (dict)
@@ -394,6 +398,7 @@ What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
+99: Full Custom
 """)
             if input1 == "0":
                 is_back = True
@@ -402,4 +407,8 @@ What should I do? (enter the number + enter)
             elif input1 == "2":
                 input1 = await aioconsole.ainput("Which status?\n")
                 await self.action_status_update(input1)
+            elif input1 == "99":
+                input1 = await aioconsole.ainput("Enter full raw request:\n")
+                req_json = self.__raw_to_json(input1)
+                await self.by_device_req_send(req_json['id'], req_json)
         pass
