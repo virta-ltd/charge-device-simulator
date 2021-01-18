@@ -119,14 +119,24 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 10,
-            "rfid": options.pop("idTag", "-")
         }
+        self.prepare_authorize_params(json_payload, **options)
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'success' not in resp_json:
             await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
+
+    def prepare_authorize_params(self, json_payload, **options):
+        options_rfid = options.pop("rfid", None)
+        if options_rfid is not None:
+            json_payload["rfid"] = options_rfid
+        else:
+            options_id_tag = options.pop("idTag", None)
+            if options_id_tag is not None:
+                json_payload["idtag"] = options_id_tag
+        pass
 
     charge_start_time = datetime.datetime.utcnow()
     charge_meter_start = 1000
@@ -138,10 +148,10 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.charge_meter_start = options.pop("meterStart", self.charge_meter_start)
         json_payload = {
             'id': 5,
-            "idtag": options.pop("idTag", "-"),
             "chg": 2,
             "out": options.pop("connectorId", 1),
         }
+        self.prepare_authorize_params(json_payload, **options)
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
             await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}", ErrorReasons.InvalidResponse)
@@ -253,7 +263,8 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         if pendingList is None:
             pendingList = list()
             self.__pending_by_device_reqs[req_id] = pendingList
-        pendingList.append(PendingReq(valid_ids, lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json)))
+        pendingList.append(PendingReq(
+            valid_ids, lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json)))
         self.__socketWriter.write(req.encode())
         await self.__socketWriter.drain()
         self.logger.debug(f"By Device Req ({action}):\n{req}")
@@ -328,6 +339,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                 "ack": "1"
             }
 
+        # Server request charge start
         if req_action == "11".lower():
             req_scmd = str(req_payload["scmd"] if "scmd" in req_payload else -1)
             if req_scmd == "1":
@@ -336,7 +348,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                     resp_payload["nack"] = "1"
                 else:
                     options = {
-                        "idTag": req_payload["idtag"] if "idtag" in req_payload else "-",
+                        "idTag": req_payload["idtag"] if "idtag" in req_payload else None,
                         "is_remote_started": True,
                     }
                     self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
@@ -354,7 +366,8 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         # "14", SettingsGprs
         # "15", SettingsByServer
         if req_action == "14".lower() or req_action == "15".lower():
-            if ("gprs" in req_payload and str(req_payload["gprs"]) == "2") or ("settings" in req_payload and str(req_payload["settings"]) == "2"):  # Try to change config
+            # Try to change config
+            if ("gprs" in req_payload and str(req_payload["gprs"]) == "2") or ("settings" in req_payload and str(req_payload["settings"]) == "2"):
                 if "upd" in req_payload and str(req_payload["upd"]) == "1":
                     resp_payload = {
                         "upd": "1"
