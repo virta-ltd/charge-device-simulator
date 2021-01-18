@@ -14,14 +14,14 @@ jobs:
     - uses: actions/checkout@v1
     - name: Export Tag Name
       run: |
-           echo "::set-env name=NEW_TAG::${GITHUB_REF/refs\/tags\//}"
+           echo "NEW_TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag virtaltd/charge-device-simulator:${{ env.NEW_TAG }}
+      run: docker build . --file Dockerfile --tag virtaltd/charge-device-simulator:$NEW_TAG
     - name: Docker Login
       run: docker login --username "${{ secrets.DOCKER_USERNAME }}" --password "${{ secrets.DOCKER_PASSWORD }}"
     - name: Docker Push
-      run: docker push virtaltd/charge-device-simulator:${{ env.NEW_TAG }}
+      run: docker push virtaltd/charge-device-simulator:$NEW_TAG
     - name: Docker Tag Latest
-      run: docker tag virtaltd/charge-device-simulator:${{ env.NEW_TAG }} virtaltd/charge-device-simulator:latest
+      run: docker tag virtaltd/charge-device-simulator:$NEW_TAG virtaltd/charge-device-simulator:latest
     - name: Docker Tag Latest Push
       run: docker push virtaltd/charge-device-simulator:latest
