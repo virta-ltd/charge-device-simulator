@@ -407,6 +407,7 @@ What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
+99: Full custom
 """)
             if input1 == "0":
                 is_back = True
@@ -415,5 +416,12 @@ What should I do? (enter the number + enter)
             elif input1 == "2":
                 input1 = await aioconsole.ainput("Which status?\n")
                 input2 = await aioconsole.ainput("Which errorCode?\n")
-                await self.action_status_update_ocpp(input1, input2)
+                input3 = await aioconsole.ainput("Which connector?\n")
+                await self.action_status_update_ocpp(input1, input2, ** {
+                    'connectorId': input3,
+                })
+            elif input1 == "99":
+                input1 = await aioconsole.ainput("Enter full custom message:\n")
+                input_parsed = json.loads(input1)
+                await self.by_device_req_send(input_parsed[2], input_parsed[3])
         pass
