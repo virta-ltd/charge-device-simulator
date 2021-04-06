@@ -283,12 +283,17 @@ class DeviceOcppJ(DeviceAbstract):
         return await self.action_meter_value(**options)
 
     async def by_device_req_send(self, action, json_payload) -> typing.Any:
-        result = asyncio.get_running_loop().create_future()
         req_id = str(uuid.uuid4())
         req = f"""[{MessageTypes.Req.value},"{req_id}","{action}",{json.dumps(json_payload)}]"""
+        return await self.by_device_req_send_raw(req, action, req_id)
+
+    async def by_device_req_send_raw(self, raw, action, req_id=None) -> typing.Any:
+        result = asyncio.get_running_loop().create_future()
+        if req_id is None:
+            req_id = str(uuid.uuid4())
         self.__pending_by_device_reqs[req_id] = lambda resp_json: self.__by_device_req_resp_ready(result, action, resp_json)
-        await self._ws.send(req)
-        self.logger.debug(f"By Device Req ({action}):\n{req}")
+        await self._ws.send(raw)
+        self.logger.debug(f"By Device Req ({action}):\n{raw}")
         try:
             return await asyncio.wait_for(result, timeout=self.response_timeout_seconds)
         except asyncio.TimeoutError:
@@ -422,6 +427,5 @@ What should I do? (enter the number + enter)
                 })
             elif input1 == "99":
                 input1 = await aioconsole.ainput("Enter full custom message:\n")
-                input_parsed = json.loads(input1)
-                await self.by_device_req_send(input_parsed[2], input_parsed[3])
+                await self.by_device_req_send_raw(input1, "Custom")
         pass
