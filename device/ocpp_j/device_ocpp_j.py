@@ -46,9 +46,10 @@ class DeviceOcppJ(DeviceAbstract):
             logging.getLogger('websockets.client').setLevel(logging.WARNING)
             logging.getLogger('websockets.server').setLevel(logging.WARNING)
             logging.getLogger('websockets.protocol').setLevel(logging.WARNING)
-            self.logger.info(f"Trying to connect with protocols: {json.dumps(self.protocols)}")
+            server_url = f"{self.server_address}/{self.deviceId}"
+            self.logger.info(f"Trying to connect.\nURL: {server_url}\nClient supported protocols: {json.dumps(self.protocols)}")
             self._ws = await websockets.connect(
-                f"{self.server_address}/{self.deviceId}",
+                server_url,
                 subprotocols=[websockets.Subprotocol(p) for p in self.protocols]
             )
             self.logger.info(f"Connected with protocol: {self._ws.subprotocol}")
