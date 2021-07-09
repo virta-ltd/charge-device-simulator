@@ -21,6 +21,7 @@ class DeviceOcppJ(DeviceAbstract):
     __logger = logging.getLogger(__name__)
     _ws: websockets.WebSocketClientProtocol = None
     __loop_internal_task: asyncio.Task = None
+    __ws_close_task: asyncio.Task = None
     __pending_by_device_reqs: typing.Dict[str, typing.Callable[[typing.Any], None]] = {}
 
     def __init__(self, device_id):
@@ -54,7 +55,7 @@ class DeviceOcppJ(DeviceAbstract):
             )
             self.logger.info(f"Connected with protocol: {self._ws.subprotocol}")
             self.__loop_internal_task = asyncio.create_task(self.__loop_internal())
-            self.__ws_close_task = asyncio.create_task(self.__ws_close_task())
+            self.__ws_close_task = asyncio.create_task(self.__ws_close())
 
             await asyncio.sleep(1)
 
@@ -78,7 +79,7 @@ class DeviceOcppJ(DeviceAbstract):
             await self._ws.close()
         pass
 
-    async def __ws_close_task(self):
+    async def __ws_close(self):
         await self._ws.wait_closed()
         await self.handle_error({
             "message": "Websocket connection closed",
