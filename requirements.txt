@@ -3,4 +3,3 @@ coloredlogs
 aioconsole
 pyyaml
 zeep[async]
-xmltodict

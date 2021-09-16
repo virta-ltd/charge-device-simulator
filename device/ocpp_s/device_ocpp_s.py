@@ -8,7 +8,6 @@ import typing
 import uuid
 
 import aioconsole
-import xmltodict
 from device import utility
 from device.abstract import DeviceAbstract
 from device.error_reasons import ErrorReasons
