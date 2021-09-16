@@ -128,7 +128,7 @@ What should I do? (enter the number + enter)
 1: Flow charge
 2: Flow heartbeat
 3: Flow authorize
-99: Custom
+99: Single message
 """)
             if input1 == "0":
                 return

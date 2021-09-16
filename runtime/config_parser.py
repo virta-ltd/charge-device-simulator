@@ -54,6 +54,33 @@ class ConfigParser:
             if 'spec_meterSerialNumber' in config:
                 dev1.spec_meterSerialNumber = config['spec_meterSerialNumber']
             result = dev1
+        if config['type'] == 'ocpp-s':
+            dev1 = device.DeviceOcppS(config['spec_identifier'])
+            if 'server_address' in config:
+                dev1.server_address = config['server_address']
+            if 'from_address' in config:
+                dev1.from_address = config['from_address']
+            if 'protocols' in config:
+                dev1.protocols = config['protocols']
+            if 'spec_chargeBoxSerialNumber' in config:
+                dev1.spec_chargeBoxSerialNumber = config['spec_chargeBoxSerialNumber']
+            if 'spec_chargePointSerialNumber' in config:
+                dev1.spec_chargePointSerialNumber = config['spec_chargePointSerialNumber']
+            if 'spec_chargePointModel' in config:
+                dev1.spec_chargePointModel = config['spec_chargePointModel']
+            if 'spec_chargePointVendor' in config:
+                dev1.spec_chargePointVendor = config['spec_chargePointVendor']
+            if 'spec_firmwareVersion' in config:
+                dev1.spec_firmwareVersion = config['spec_firmwareVersion']
+            if 'spec_iccid' in config:
+                dev1.spec_iccid = config['spec_iccid']
+            if 'spec_imsi' in config:
+                dev1.spec_imsi = config['spec_imsi']
+            if 'spec_meterType' in config:
+                dev1.spec_meterType = config['spec_meterType']
+            if 'spec_meterSerialNumber' in config:
+                dev1.spec_meterSerialNumber = config['spec_meterSerialNumber']
+            result = dev1
         elif config['type'] == 'ensto':
             dev1 = device.DeviceEnsto(config['spec_identifier'])
             if 'server_host' in config:
