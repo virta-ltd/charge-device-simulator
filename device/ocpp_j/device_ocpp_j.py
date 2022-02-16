@@ -5,6 +5,7 @@ import logging
 import math
 import typing
 import uuid
+import urllib.parse
 
 import aioconsole
 import websockets
@@ -47,7 +48,7 @@ class DeviceOcppJ(DeviceAbstract):
             logging.getLogger('websockets.client').setLevel(logging.WARNING)
             logging.getLogger('websockets.server').setLevel(logging.WARNING)
             logging.getLogger('websockets.protocol').setLevel(logging.WARNING)
-            server_url = f"{self.server_address}/{self.deviceId}"
+            server_url = f"{self.server_address}/{urllib.parse.quote(self.deviceId)}"
             self.logger.info(f"Trying to connect.\nURL: {server_url}\nClient supported protocols: {json.dumps(self.protocols)}")
             self._ws = await websockets.connect(
                 server_url,
