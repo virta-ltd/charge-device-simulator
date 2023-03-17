@@ -6,6 +6,7 @@ import math
 import typing
 import uuid
 import urllib.parse
+import readline; # unused but somehow fixes character limitation when pasting into terminal
 
 import aioconsole
 import websockets
@@ -429,6 +430,6 @@ What should I do? (enter the number + enter)
                     'connectorId': input3,
                 })
             elif input1 == "99":
-                input1 = await aioconsole.ainput("Enter full custom message:\n")
+                input1 = input("Enter full custom message:\n")
                 await self.by_device_req_send_raw(input1, "Custom")
         pass
