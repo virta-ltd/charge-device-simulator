@@ -6,7 +6,7 @@ import math
 import typing
 import uuid
 import urllib.parse
-import readline; # unused but somehow fixes character limitation when pasting into terminal
+import readline
 
 import aioconsole
 import websockets
@@ -17,6 +17,10 @@ from device.error_reasons import ErrorReasons
 from device.ocpp_j.message_types import MessageTypes
 from model.error_message import ErrorMessage
 
+# Fake call to readline module to make sure it is loaded
+# we need this since on OS-X if the readline module is not loaded, the input
+# from terminal using input() will be limited to small number of characters
+readline.get_completion_type()
 
 class DeviceOcppJ(DeviceAbstract):
     server_address = ""
