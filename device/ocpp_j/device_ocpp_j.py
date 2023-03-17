@@ -6,6 +6,7 @@ import math
 import typing
 import uuid
 import urllib.parse
+import readline
 
 import aioconsole
 import websockets
@@ -16,6 +17,10 @@ from device.error_reasons import ErrorReasons
 from device.ocpp_j.message_types import MessageTypes
 from model.error_message import ErrorMessage
 
+# Fake call to readline module to make sure it is loaded
+# we need this since on OS-X if the readline module is not loaded, the input
+# from terminal using input() will be limited to small number of characters
+readline.get_completion_type()
 
 class DeviceOcppJ(DeviceAbstract):
     server_address = ""
@@ -429,6 +434,6 @@ What should I do? (enter the number + enter)
                     'connectorId': input3,
                 })
             elif input1 == "99":
-                input1 = await aioconsole.ainput("Enter full custom message:\n")
+                input1 = input("Enter full custom message:\n")
                 await self.by_device_req_send_raw(input1, "Custom")
         pass
