@@ -12,7 +12,7 @@ Simulators are developed using `Python 3.7`. You can:
 
 + Open the root folder your editor of choice (`PyCharm` or `VS Code` are suggested ones)
 + Create your virtual env (suggested method compared to system-wide python)
-+ Run `pip3 install requirements.txt` manually or use your IDE to do so
++ Run `pip3 install -r requirements.txt` manually or use your IDE to do so
 + Inside `debug` folder you can find two versions for test/debug:
     + With `python3 ./playground.py` you can debug/test using python interpreter
     + With `python3 ./docker_entry.py --config=debug/config.yaml --simulation=sim1` 
