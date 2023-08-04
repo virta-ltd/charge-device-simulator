@@ -53,6 +53,9 @@ class ConfigParser:
                 dev1.spec_meterType = config['spec_meterType']
             if 'spec_meterSerialNumber' in config:
                 dev1.spec_meterSerialNumber = config['spec_meterSerialNumber']
+            if 'response_payloads' in config:
+                dev1.customized_responses = True
+                dev1.response_payloads = config['response_payloads']
             result = dev1
         if config['type'] == 'ocpp-s':
             dev1 = device.DeviceOcppS(config['spec_identifier'])

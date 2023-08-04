@@ -43,6 +43,8 @@ class DeviceOcppJ(DeviceAbstract):
         self.spec_chargePointModel = None
         self.spec_chargePointVendor = None
         self.spec_chargePointSerialNumber = None
+        self.customized_responses = False
+        self.response_payloads = None
 
     @property
     def logger(self) -> logging:
@@ -350,7 +352,11 @@ class DeviceOcppJ(DeviceAbstract):
 
     async def by_middleware_req(self, req_id: str, req_action: str, req_payload: typing.Any):
         resp_payload = None
-        if req_action in map(lambda x: str(x).lower(), [
+        if self.customized_responses and req_action in map(lambda x: x["name"].lower(), self.response_payloads):
+            customized_response = next(x for x in self.response_payloads if x["name"].lower() == req_action)
+            resp_payload = customized_response["response"]
+            self.response_payloads.remove(customized_response)
+        elif req_action in map(lambda x: str(x).lower(), [
             "ClearCache",
             "ChangeAvailability",
             "RemoteStartTransaction",
@@ -381,7 +387,7 @@ class DeviceOcppJ(DeviceAbstract):
                 "fileName": "fake_file_name.log"
             }
 
-        if req_action == "RemoteStartTransaction".lower():
+        if not self.customized_responses and req_action == "RemoteStartTransaction".lower():
             if not self.charge_can_start():
                 resp_payload["status"] = "Rejected"
             else:
@@ -392,13 +398,13 @@ class DeviceOcppJ(DeviceAbstract):
                 self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
                 asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
 
-        if req_action == "RemoteStopTransaction".lower():
+        if not self.customized_responses and req_action == "RemoteStopTransaction".lower():
             if not self.charge_can_stop(req_payload["transactionId"] if "transactionId" in req_payload else 0):
                 resp_payload["status"] = "Rejected"
             else:
                 asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
 
-        if req_action == "Reset".lower():
+        if req_action == "Reset".lower() and resp_payload["status"] == "Accepted":
             asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
 
         if resp_payload is not None:
@@ -420,6 +426,7 @@ What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
+98: """ + ("Disable" if self.customized_responses else "Enable") + """ Customized Responses
 99: Full custom
 """)
             if input1 == "0":
@@ -436,4 +443,7 @@ What should I do? (enter the number + enter)
             elif input1 == "99":
                 input1 = input("Enter full custom message:\n")
                 await self.by_device_req_send_raw(input1, "Custom")
+            elif input1 == "98":
+                self.customized_responses = not self.customized_responses
+
         pass
