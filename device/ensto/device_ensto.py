@@ -32,6 +32,8 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.spec_sw = None
         self.spec_model = None
         self.spec_vendor = None
+        self.customized_responses = False
+        self.response_payloads = None
 
     @property
     def logger(self) -> logging:
@@ -329,7 +331,13 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def by_middleware_req(self, req_action: str, req_payload: typing.Any) -> bool:
         self.logger.debug(f"Device Read, Request, Message:\n{req_payload}")
         resp_payload = None
-        if req_action in map(lambda x: str(x).lower(), [
+        customized_response_configured = False
+        if self.customized_responses and req_action in map(lambda x: x["name"].lower(), self.response_payloads):
+            customized_response = next(x for x in self.response_payloads if x["name"].lower() == req_action)
+            resp_payload = customized_response["response"]
+            customized_response_configured = True
+            self.response_payloads.remove(customized_response)
+        elif req_action in map(lambda x: str(x).lower(), [
             "20",  # OutOfOrder
             "11",  # ChargingRequestByServer
             "17",  # HatchOpen
@@ -340,10 +348,10 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             }
 
         # Server request charge start
-        if req_action == "11".lower():
+        if ((customized_response_configured and resp_payload["ack"] == "1") or not customized_response_configured) and req_action == "11".lower():
             req_scmd = str(req_payload["scmd"] if "scmd" in req_payload else -1)
             if req_scmd == "1":
-                if not self.charge_can_start():
+                if not self.charge_can_start() and not customized_response_configured:
                     del resp_payload["ack"]
                     resp_payload["nack"] = "1"
                 else:
@@ -354,18 +362,18 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                     self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
                     asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
             elif req_scmd == "0":
-                if not self.charge_can_stop(-1):
+                if not self.charge_can_stop(-1) and not customized_response_configured:
                     del resp_payload["ack"]
                     resp_payload["nack"] = "1"
                 else:
                     asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
-            else:
+            elif not customized_response_configured:
                 del resp_payload["ack"]
                 resp_payload["nack"] = "1"
 
         # "14", SettingsGprs
         # "15", SettingsByServer
-        if req_action == "14".lower() or req_action == "15".lower():
+        if ((not customized_response_configured) and (req_action == "14".lower() or req_action == "15".lower())):
             # Try to change config
             if ("gprs" in req_payload and str(req_payload["gprs"]) == "2") or ("settings" in req_payload and str(req_payload["settings"]) == "2"):
                 if "upd" in req_payload and str(req_payload["upd"]) == "1":
@@ -385,7 +393,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                 }
 
         # Restart
-        if req_action == "42".lower():
+        if req_action == "42".lower() and resp_payload["ack"] == "1":
             asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
 
         if resp_payload is not None:
