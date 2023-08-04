@@ -388,6 +388,7 @@ What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
+98: """ + ("Disable" if self.customized_responses else "Enable") + """ Customized Responses
 99: Full custom
 """)
             if input1 == "0":
@@ -405,4 +406,6 @@ What should I do? (enter the number + enter)
                 input_action = await aioconsole.ainput("Enter full custom action name:\n")
                 input_payload = await aioconsole.ainput("Enter full custom payload:\n")
                 await self.by_device_req_send_raw(json.loads(input_payload), input_action)
+            elif input1 == "98":
+                self.customized_responses = not self.customized_responses
         pass
