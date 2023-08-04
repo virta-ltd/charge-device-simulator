@@ -387,6 +387,44 @@ class DeviceOcppJ(DeviceAbstract):
                 "fileName": "fake_file_name.log"
             }
 
+        if req_action == "TriggerMessage".lower():
+            if req_payload["requestedMessage"] == "MeterValues":
+                options = {
+                    "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
+                }
+                resp_payload = {
+                    "status": "Accepted"
+                }
+                await self.by_middleware_req_response_ready(req_id, resp_payload);
+                await self.action_meter_value(**options)
+                return
+            if req_payload["requestedMessage"] == "BootNotification":
+                resp_payload = {
+                    "status": "Accepted"
+                }
+                await self.by_middleware_req_response_ready(req_id, resp_payload);
+                await self.action_register()
+                return
+            if req_payload["requestedMessage"] == "Heartbeat":
+                resp_payload = {
+                    "status": "Accepted"
+                }
+                await self.by_middleware_req_response_ready(req_id, resp_payload);
+                await self.action_heart_beat()
+                return
+            if req_payload["requestedMessage"] == "StatusNotification":
+                options = {
+                    "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
+                }
+                resp_payload = {
+                    "status": "Accepted"
+                }
+                await self.by_middleware_req_response_ready(req_id, resp_payload);
+                if self.charge_in_progress:
+                    await self.action_status_update("Charging",**options)
+                else:
+                    await self.action_status_update("Available",**options)
+                return
         if not self.customized_responses and req_action == "RemoteStartTransaction".lower():
             if not self.charge_can_start():
                 resp_payload["status"] = "Rejected"
@@ -407,12 +445,17 @@ class DeviceOcppJ(DeviceAbstract):
         if req_action == "Reset".lower() and resp_payload["status"] == "Accepted":
             asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
 
-        if resp_payload is not None:
-            resp = f"""[{MessageTypes.Resp.value},"{req_id}",{json.dumps(resp_payload)}]"""
-            await self._ws.send(resp)
-            self.logger.debug(f"Device Read, Request, Responded:\n{resp}")
-        else:
+        if resp_payload is None:
             self.logger.warning(f"Device Read, Request, Unknown or not supported: {req_action}")
+            return
+        await self.by_middleware_req_response_ready(req_id, resp_payload)
+
+    async def by_middleware_req_response_ready(self, req_id, resp_payload):
+        if resp_payload is None:
+            return
+        resp = f"""[{MessageTypes.Resp.value},"{req_id}",{json.dumps(resp_payload)}]"""
+        await self._ws.send(resp)
+        self.logger.debug(f"Device Read, Request, Responded:\n{resp}")
 
     async def flow_charge_stop(self):
         self.charge_in_progress = False
