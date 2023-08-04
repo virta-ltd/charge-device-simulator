@@ -43,6 +43,8 @@ class DeviceOcppJ(DeviceAbstract):
         self.spec_chargePointModel = None
         self.spec_chargePointVendor = None
         self.spec_chargePointSerialNumber = None
+        self.customized_responses = False
+        self.response_payloads = None
 
     @property
     def logger(self) -> logging:
@@ -350,7 +352,13 @@ class DeviceOcppJ(DeviceAbstract):
 
     async def by_middleware_req(self, req_id: str, req_action: str, req_payload: typing.Any):
         resp_payload = None
-        if req_action in map(lambda x: str(x).lower(), [
+        customized_response_configured = False
+        if self.customized_responses and req_action in map(lambda x: x["name"].lower(), self.response_payloads):
+            customized_response = next(x for x in self.response_payloads if x["name"].lower() == req_action)
+            resp_payload = customized_response["response"]
+            customized_response_configured = True
+            self.response_payloads.remove(customized_response)
+        elif req_action in map(lambda x: str(x).lower(), [
             "ClearCache",
             "ChangeAvailability",
             "RemoteStartTransaction",
@@ -382,45 +390,46 @@ class DeviceOcppJ(DeviceAbstract):
             }
 
         if req_action == "TriggerMessage".lower():
-            if req_payload["requestedMessage"] == "MeterValues":
-                options = {
-                    "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
-                }
-                resp_payload = {
-                    "status": "Accepted"
-                }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
-                await self.action_meter_value(**options)
-                return
-            if req_payload["requestedMessage"] == "BootNotification":
-                resp_payload = {
-                    "status": "Accepted"
-                }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
-                await self.action_register()
-                return
-            if req_payload["requestedMessage"] == "Heartbeat":
-                resp_payload = {
-                    "status": "Accepted"
-                }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
-                await self.action_heart_beat()
-                return
-            if req_payload["requestedMessage"] == "StatusNotification":
-                options = {
-                    "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
-                }
-                resp_payload = {
-                    "status": "Accepted"
-                }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
-                if self.charge_in_progress:
-                    await self.action_status_update("Charging",**options)
-                else:
-                    await self.action_status_update("Available",**options)
-                return
-        if req_action == "RemoteStartTransaction".lower():
-            if not self.charge_can_start():
+            if (customized_response_configured and resp_payload["status"] == "Accepted") or (not customized_response_configured):
+                if req_payload["requestedMessage"] == "MeterValues":
+                    options = {
+                        "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
+                    }
+                    resp_payload = {
+                        "status": "Accepted"
+                    }
+                    await self.by_middleware_req_response_ready(req_id, resp_payload);
+                    await self.action_meter_value(**options)
+                    return
+                if req_payload["requestedMessage"] == "BootNotification":
+                    resp_payload = {
+                        "status": "Accepted"
+                    }
+                    await self.by_middleware_req_response_ready(req_id, resp_payload);
+                    await self.action_register()
+                    return
+                if req_payload["requestedMessage"] == "Heartbeat":
+                    resp_payload = {
+                        "status": "Accepted"
+                    }
+                    await self.by_middleware_req_response_ready(req_id, resp_payload);
+                    await self.action_heart_beat()
+                    return
+                if req_payload["requestedMessage"] == "StatusNotification":
+                    options = {
+                        "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
+                    }
+                    resp_payload = {
+                        "status": "Accepted"
+                    }
+                    await self.by_middleware_req_response_ready(req_id, resp_payload);
+                    if self.charge_in_progress:
+                        await self.action_status_update("Charging",**options)
+                    else:
+                        await self.action_status_update("Available",**options)
+                    return
+        if ((customized_response_configured and resp_payload["status"] == "Accepted") or not customized_response_configured) and req_action == "RemoteStartTransaction".lower():
+            if not self.charge_can_start() and not customized_response_configured:
                 resp_payload["status"] = "Rejected"
             else:
                 options = {
@@ -430,13 +439,13 @@ class DeviceOcppJ(DeviceAbstract):
                 self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
                 asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
 
-        if req_action == "RemoteStopTransaction".lower():
-            if not self.charge_can_stop(req_payload["transactionId"] if "transactionId" in req_payload else 0):
+        if ((customized_response_configured and resp_payload["status"] == "Accepted") or not customized_response_configured) and req_action == "RemoteStopTransaction".lower():
+            if not self.charge_can_stop(req_payload["transactionId"] if "transactionId" in req_payload else 0) and not customized_response_configured:
                 resp_payload["status"] = "Rejected"
             else:
                 asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
 
-        if req_action == "Reset".lower():
+        if req_action == "Reset".lower() and resp_payload["status"] == "Accepted":
             asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
 
         if resp_payload is None:
@@ -463,6 +472,7 @@ What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
+98: """ + ("Disable" if self.customized_responses else "Enable") + """ Customized Responses
 99: Full custom
 """)
             if input1 == "0":
@@ -479,4 +489,7 @@ What should I do? (enter the number + enter)
             elif input1 == "99":
                 input1 = input("Enter full custom message:\n")
                 await self.by_device_req_send_raw(input1, "Custom")
+            elif input1 == "98":
+                self.customized_responses = not self.customized_responses
+
         pass

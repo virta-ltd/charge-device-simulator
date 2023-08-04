@@ -103,5 +103,7 @@ class ConfigParser:
             result.error_exit = config['error_exit']
         if 'response_timeout_seconds' in config:
             result.response_timeout_seconds = config['response_timeout_seconds']
-
+        if 'response_payloads' in config:
+            result.customized_responses = True
+            result.response_payloads = config['response_payloads']
         return result
