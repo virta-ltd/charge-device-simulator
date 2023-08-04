@@ -39,7 +39,28 @@ devices:
     spec_imsi: 5678 # OCPP-J property
     spec_meterType: MeterType_X # OCPP-J property
     spec_meterSerialNumber: NO_ID # OCPP-J property
-
+    response_payloads: # customized responsed per request
+      - name: GetConfiguration
+        response:
+          configurationKey:
+          - key: CreditCardEnergyTariff
+            value: '0,0'
+            readonly: 'false'
+          - key: CreditCardTimeTariff
+            value: '1,0'
+            readonly: 'false'
+          - key: CreditCardCurrency
+            value: EUR
+            readonly: 'false'
+      - name: ChangeConfiguration
+        response:
+          status: Accepted
+      - name: ChangeConfiguration
+        response:
+          status: Accepted
+      - name: Reset
+        response:
+          status: Accepted
   - type: ensto
     name: test-ensto-1
     server_host: "sample-server.com" # Sample Server
@@ -51,3 +72,13 @@ devices:
     spec_vendor: Vendor_X
     spec_model: Model_X
     spec_sw: SW_X
+    response_payloads: # customized responsed per request
+      - name: 14
+        response:
+          upd: 1
+      - name: 42
+        response:
+          ack: 1
+      - name: 42
+        response:
+          nack: 1
