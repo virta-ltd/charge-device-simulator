@@ -33,7 +33,7 @@ class DeviceOcppJ(DeviceAbstract):
     def __init__(self, device_id):
         super().__init__(device_id)
         self.flow_frequent_delay_seconds = 30
-        self.protocols = ['ocpp1.6', 'ocpp1.5']
+        self.protocols = ['ocpp1.6', 'ocpp1.5', 'ocpp2.0.1']
         self.spec_meterSerialNumber = None
         self.spec_meterType = None
         self.spec_imsi = None
@@ -98,24 +98,44 @@ class DeviceOcppJ(DeviceAbstract):
         action = "BootNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {}
-        if self.spec_chargePointVendor is not None:
-            json_payload['chargePointVendor'] = self.spec_chargePointVendor
-        if self.spec_chargePointModel is not None:
-            json_payload['chargePointModel'] = self.spec_chargePointModel
-        if self.spec_chargeBoxSerialNumber is not None:
-            json_payload['chargeBoxSerialNumber'] = self.spec_chargeBoxSerialNumber
-        if self.spec_firmwareVersion is not None:
-            json_payload['firmwareVersion'] = self.spec_firmwareVersion
-        if self.spec_iccid is not None:
-            json_payload['iccid'] = self.spec_iccid
-        if self.spec_imsi is not None:
-            json_payload['imsi'] = self.spec_imsi
-        if self.spec_meterType is not None:
-            json_payload['meterType'] = self.spec_meterType
-        if self.spec_meterSerialNumber is not None:
-            json_payload['meterSerialNumber'] = self.spec_meterSerialNumber
-        if self.spec_chargePointSerialNumber is not None:
-            json_payload['chargePointSerialNumber'] = self.spec_chargePointSerialNumber
+        if self._ws.subprotocol != 'ocpp2.0.1':
+            if self.spec_chargePointVendor is not None:
+                json_payload['chargePointVendor'] = self.spec_chargePointVendor
+            if self.spec_chargePointModel is not None:
+                json_payload['chargePointModel'] = self.spec_chargePointModel
+            if self.spec_chargeBoxSerialNumber is not None:
+                json_payload['chargeBoxSerialNumber'] = self.spec_chargeBoxSerialNumber
+            if self.spec_firmwareVersion is not None:
+                json_payload['firmwareVersion'] = self.spec_firmwareVersion
+            if self.spec_iccid is not None:
+                json_payload['iccid'] = self.spec_iccid
+            if self.spec_imsi is not None:
+                json_payload['imsi'] = self.spec_imsi
+            if self.spec_meterType is not None:
+                json_payload['meterType'] = self.spec_meterType
+            if self.spec_meterSerialNumber is not None:
+                json_payload['meterSerialNumber'] = self.spec_meterSerialNumber
+            if self.spec_chargePointSerialNumber is not None:
+                json_payload['chargePointSerialNumber'] = self.spec_chargePointSerialNumber
+        else:
+            json_payload['chargingStation'] = {}
+            json_payload['reason'] = 'RemoteReset'
+            if self.spec_chargePointVendor is not None:
+                json_payload['chargingStation']['vendorName'] = self.spec_chargePointVendor
+            if self.spec_chargePointModel is not None:
+                json_payload['chargingStation']['model'] = self.spec_chargePointModel
+            if self.spec_chargeBoxSerialNumber is not None:
+                json_payload['chargingStation']['serialNumber'] = self.spec_chargeBoxSerialNumber
+            if self.spec_firmwareVersion is not None:
+                json_payload['chargingStation']['firmwareVersion'] = self.spec_firmwareVersion
+            if self.spec_iccid is not None:
+                if 'modem' not in json_payload['chargingStation']:
+                    json_payload['chargingStation']['modem'] = {}
+                json_payload['chargingStation']['modem']['iccid'] = self.spec_iccid
+            if self.spec_imsi is not None:
+                if 'modem' not in json_payload['chargingStation']:
+                    json_payload['chargingStation']['modem'] = {}
+                json_payload['chargingStation']['modem']['imsi'] = self.spec_imsi
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
