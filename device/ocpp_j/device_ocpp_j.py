@@ -43,6 +43,7 @@ class DeviceOcppJ(DeviceAbstract):
         self.spec_chargePointModel = None
         self.spec_chargePointVendor = None
         self.spec_chargePointSerialNumber = None
+        self.charge_seq_no = 0
 
     @property
     def logger(self) -> logging:
@@ -152,6 +153,8 @@ class DeviceOcppJ(DeviceAbstract):
         return True
 
     async def action_status_update(self, status, **options) -> bool:
+        if self._ws.subprotocol == 'ocpp2.0.1':
+            return await self.action_status_update_ocpp2(status, **options)
         return await self.action_status_update_ocpp(status, "NoError", **options)
 
     async def action_status_update_ocpp(self, status, errorCode, **options) -> bool:
@@ -167,14 +170,39 @@ class DeviceOcppJ(DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
+    async def action_status_update_ocpp2(self, status, **options) -> bool:
+        action = "StatusNotification"
+        self.logger.info(f"Action {action} Start")
+        json_payload = {
+            "connectorId": options.pop("connectorId", 1),
+            "evseId": options.pop("evseId", 1),
+            "connectorStatus": status,
+            "timestamp": self.utcnow_iso()
+        }
+        if await self.by_device_req_send(action, json_payload) is None:
+            return False
+        self.logger.info(f"Action {action} End")
+        return True
+
     async def action_authorize(self, **options) -> bool:
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
+        id_tag = options.pop("idTag", "-")
+        key_name = "idTagInfo"
         json_payload = {
-            "idTag": options.pop("idTag", "-")
+            "idTag": id_tag
         }
+        if self._ws.subprotocol == 'ocpp2.0.1':
+            json_payload = {
+                "idToken": {
+                    "idToken": id_tag,
+                    "type":"ISO14443"
+                }
+            }
+            key_name = "idTokenInfo"
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
+
+        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
@@ -198,17 +226,60 @@ class DeviceOcppJ(DeviceAbstract):
         self.logger.info(f"Action {action} Start")
         self.charge_start_time = datetime.datetime.utcnow()
         self.charge_meter_start = options.pop("meterStart", self.charge_meter_start)
+        key_name = "idTagInfo"
+        id_tag = options.pop("idTag", "-")
+        evse_id = options.pop("evseId", 1)
+        conenctor_id = options.pop("connectorId", 1)
         json_payload = {
             "timestamp": self.utcnow_iso(),
-            "connectorId": options.pop("connectorId", 1),
+            "connectorId": conenctor_id,
             "meterStart": self.charge_meter_start,
-            "idTag": options.pop("idTag", "-")
+            "idTag": id_tag
         }
+        transaction_id = str(uuid.uuid4())
+        if self._ws.subprotocol == 'ocpp2.0.1':
+            action = "TransactionEvent"
+            json_payload = {
+                "eventType": "Started",
+                "timestamp": self.utcnow_iso(),
+                "triggerReason": "Authorized",
+                "seqNo":0,
+                "transactionInfo": {
+                    "transactionId": transaction_id,
+                    "chargingState":"Idle"
+                },
+                "meterValue":[
+                    {
+                        "sampledValue": [
+                            {
+                                "value": self.charge_meter_start,
+                                "context":"Transaction.Begin",
+                                "unitOfMeasure": {
+                                    "unit":"kWh"
+                                }
+                            }
+                        ],
+                    "timestamp":self.utcnow_iso()
+                    }
+                ],
+                "evse": {
+                    "id": evse_id,
+                    "connectorId": conenctor_id
+                },
+                "idToken": {
+                    "idToken": id_tag,
+                    "type":"ISO14443"
+                    }
+                }
+            key_name = "idTokenInfo"
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
+        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
-        self.charge_id = resp_json[2]['transactionId']
+        if self._ws.subprotocol == 'ocpp2.0.1':
+            self.charge_id = transaction_id
+        else:
+            self.charge_id = resp_json[2]['transactionId']
         self.charge_in_progress = True
         self.logger.info(f"Action {action} End")
         return True
@@ -223,8 +294,10 @@ class DeviceOcppJ(DeviceAbstract):
     async def action_meter_value(self, **options) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
+        evse_id = options.pop("evseId", 1)
+        conenctor_id = options.pop("connectorId", 1)
         json_payload = {
-            "connectorId": options.pop("connectorId", 1),
+            "connectorId": conenctor_id,
             "transactionId": self.charge_id,
             "meterValue": [{
                 "timestamp": self.utcnow_iso(),
@@ -237,6 +310,39 @@ class DeviceOcppJ(DeviceAbstract):
                 }]
             }]
         }
+        if self._ws.subprotocol == 'ocpp2.0.1':
+            self.charge_seq_no += 1
+            action = "TransactionEvent"
+            json_payload = {
+                "eventType": "Updated",
+                "timestamp": self.utcnow_iso(),
+                "triggerReason": "ChargingStateChanged",
+                "seqNo": self.charge_seq_no,
+                "transactionInfo": {
+                    "transactionId": self.charge_id,
+                    "chargingState":"Charging"
+                },
+                "meterValue":[
+                    {
+                        "sampledValue": [
+                            {
+                                "value": self.charge_meter_value_current(**options),
+                                "context":"Sample.Periodic",
+                                "measurand": "Energy.Active.Import.Register",
+                                "location": "Outlet",
+                                "unitOfMeasure": {
+                                    "unit":"kWh"
+                                }
+                            }
+                        ],
+                    "timestamp":self.utcnow_iso()
+                    }
+                ],
+                "evse": {
+                    "id": evse_id,
+                    "connectorId": conenctor_id
+                }
+            }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None:
             return False
@@ -246,15 +352,57 @@ class DeviceOcppJ(DeviceAbstract):
     async def action_charge_stop(self, **options) -> bool:
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
+        key_name = "idTagInfo"
+        id_tag = options.pop("idTag", "-")
+        evse_id = options.pop("evseId", 1)
+        conenctor_id = options.pop("connectorId", 1)
         json_payload = {
             "timestamp": self.utcnow_iso(),
             "transactionId": self.charge_id,
             "meterStop": self.charge_meter_value_current(**options),
-            "idTag": options.pop("idTag", "-"),
+            "idTag": id_tag,
             "reason": options.pop("stopReason", "Local")
         }
+        if self._ws.subprotocol == 'ocpp2.0.1':
+            self.charge_seq_no += 1
+            action = "TransactionEvent"
+            key_name = "idTokenInfo"
+            json_payload = {
+                "eventType": "Ended",
+                "timestamp": self.utcnow_iso(),
+                "triggerReason": "ChargingStateChanged",
+                "seqNo": self.charge_seq_no,
+                "transactionInfo": {
+                    "transactionId": self.charge_id,
+                    "chargingState":"Transaction.Ended"
+                },
+                "meterValue":[
+                    {
+                        "sampledValue": [
+                            {
+                                "value": self.charge_meter_value_current(**options),
+                                "context":"Sample.Periodic",
+                                "measurand": "Energy.Active.Import.Register",
+                                "location": "Outlet",
+                                "unitOfMeasure": {
+                                    "unit":"kWh"
+                                }
+                            }
+                        ],
+                    "timestamp":self.utcnow_iso()
+                    }
+                ],
+                "evse": {
+                    "id": evse_id,
+                    "connectorId": conenctor_id
+                },
+                "idToken": {
+                    "idToken": id_tag,
+                    "type":"ISO14443"
+                }
+            }
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or resp_json[2]['idTagInfo']['status'] != 'Accepted':
+        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
@@ -279,30 +427,50 @@ class DeviceOcppJ(DeviceAbstract):
     async def flow_charge(self, auto_stop: bool, **options) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not await self.action_authorize(**options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_charge_start(**options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Preparing", **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Charging", **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Finishing", **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_charge_stop(**options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Available", **options):
-            self.charge_in_progress = False
-            return False
+        if self._ws.subprotocol == 'ocpp2.0.1':
+            if not await self.action_authorize(**options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_status_update("Occupied", **options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_charge_start(**options):
+                self.charge_in_progress = False
+                return False
+            if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_charge_stop(**options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_status_update("Available", **options):
+                self.charge_in_progress = False
+                return False
+        else:
+            if not await self.action_authorize(**options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_charge_start(**options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_status_update("Preparing", **options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_status_update("Charging", **options):
+                self.charge_in_progress = False
+                return False
+            if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_status_update("Finishing", **options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_charge_stop(**options):
+                self.charge_in_progress = False
+                return False
+            if not await self.action_status_update("Available", **options):
+                self.charge_in_progress = False
+                return False
         self.logger.info(f"Flow {log_title} End")
         self.charge_in_progress = False
         return True
@@ -384,6 +552,8 @@ class DeviceOcppJ(DeviceAbstract):
             "ReserveNow",
             "Reset",
             "DataTransfer",
+            "RequestStartTransaction",
+            "RequestStopTransaction"
         ]):
             resp_payload = {
                 "status": "Accepted"
