@@ -46,9 +46,9 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         return True
 
     async def action_status_update(self, status, **options) -> bool:
-        return await self.action_status_update_ocpp2(status, **options)
+        return await self.action_status_update_ocpp(status, **options)
         
-    async def action_status_update_ocpp2(self, status, **options) -> bool:
+    async def action_status_update_ocpp(self, status, **options) -> bool:
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -180,6 +180,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         return True
 
     async def action_charge_stop(self, **options) -> bool:
+        action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
         id_tag = options.pop("idTag", "-")
         evse_id = options.pop("evseId", 1)
