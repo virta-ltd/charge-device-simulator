@@ -108,7 +108,7 @@ class ConfigParser:
 
     @staticmethod
     def create_ocppj_device(config) -> device.DeviceAbstract:
-        if 'ocpp2.0.1' in config['protocols']:
+        if 'protocols' in config and 'ocpp2.0.1' in config['protocols']:
             return device.DeviceOcppJ201(config['spec_identifier'])
         else:
             return device.DeviceOcppJ16(config['spec_identifier'])

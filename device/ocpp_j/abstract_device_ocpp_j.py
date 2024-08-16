@@ -120,6 +120,53 @@ class AbstractDeviceOcppJ(DeviceAbstract):
             * options.pop("chargedKwhPerMinute", 1)
             * 1000
         ))
+    
+    async def flow_heartbeat(self) -> bool:
+        log_title = self.flow_heartbeat.__name__
+        self.logger.info(f"Flow {log_title} Start")
+        if not await self.action_heart_beat():
+            return False
+        self.logger.info(f"Flow {log_title} End")
+        return True
+    
+    async def flow_authorize(self, **options) -> bool:
+        log_title = self.flow_authorize.__name__
+        self.logger.info(f"Flow {log_title} Start")
+        if not await self.action_authorize(**options):
+            return False
+        self.logger.info(f"Flow {log_title} End")
+        return True
+
+    async def flow_charge(self, auto_stop: bool, **options) -> bool:
+        log_title = self.flow_charge.__name__
+        self.logger.info(f"Flow {log_title} Start")
+        if not await self.action_authorize(**options):
+            self.charge_in_progress = False
+            return False
+        if not await self.action_charge_start(**options):
+            self.charge_in_progress = False
+            return False
+        if not await self.action_status_update("Preparing", **options):
+            self.charge_in_progress = False
+            return False
+        if not await self.action_status_update("Charging", **options):
+            self.charge_in_progress = False
+            return False
+        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+            self.charge_in_progress = False
+            return False
+        if not await self.action_status_update("Finishing", **options):
+            self.charge_in_progress = False
+            return False
+        if not await self.action_charge_stop(**options):
+            self.charge_in_progress = False
+            return False
+        if not await self.action_status_update("Available", **options):
+            self.charge_in_progress = False
+            return False
+        self.logger.info(f"Flow {log_title} End")
+        self.charge_in_progress = False
+        return True
 
     async def flow_charge_ongoing_actions(self, **options) -> bool:
         return await self.action_meter_value(**options)
