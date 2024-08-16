@@ -30,7 +30,7 @@ class ConfigParser:
     def parse_device(config) -> device.DeviceAbstract:
         result: Optional[device.DeviceAbstract] = None
         if config['type'] == 'ocpp-j':
-            dev1 = ConfigParser.create_ocppj_device(config=config)
+            dev1 = ConfigParser.create_ocppj_device(config)
             if 'server_address' in config:
                 dev1.server_address = config['server_address']
             if 'protocols' in config:

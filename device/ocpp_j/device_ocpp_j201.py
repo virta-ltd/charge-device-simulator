@@ -2,6 +2,7 @@ import datetime
 import uuid
 import readline
 
+import aioconsole
 from device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
 from device.error_reasons import ErrorReasons
 
@@ -253,3 +254,30 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Flow {log_title} End")
         self.charge_in_progress = False
         return True
+    
+    async def loop_interactive_custom(self):
+        is_back = False
+        while not is_back:
+            input1 = await aioconsole.ainput("""
+What should I do? (enter the number + enter)
+0: Back
+1: HeartBeat
+2: StatusUpdate
+99: Full custom
+""")
+            if input1 == "0":
+                is_back = True
+            elif input1 == "1":
+                await self.action_heart_beat()
+            elif input1 == "2":
+                input1 = await aioconsole.ainput("Which status?\n")
+                input2 = await aioconsole.ainput("Which evseId?\n")
+                input3 = await aioconsole.ainput("Which connector?\n")
+                await self.action_status_update_ocpp(input1, ** {
+                    'evseId': input2,
+                    'connectorId': input3,
+                })
+            elif input1 == "99":
+                input1 = input("Enter full custom message:\n")
+                await self.by_device_req_send_raw(input1, "Custom")
+        pass
