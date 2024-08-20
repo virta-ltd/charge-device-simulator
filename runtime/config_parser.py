@@ -30,7 +30,7 @@ class ConfigParser:
     def parse_device(config) -> device.DeviceAbstract:
         result: Optional[device.DeviceAbstract] = None
         if config['type'] == 'ocpp-j':
-            dev1 = device.DeviceOcppJ(config['spec_identifier'])
+            dev1 = ConfigParser.create_ocppj_device(config)
             if 'server_address' in config:
                 dev1.server_address = config['server_address']
             if 'protocols' in config:
@@ -105,3 +105,10 @@ class ConfigParser:
             result.response_timeout_seconds = config['response_timeout_seconds']
 
         return result
+
+    @staticmethod
+    def create_ocppj_device(config) -> device.DeviceAbstract:
+        if 'protocols' in config and 'ocpp2.0.1' in config['protocols']:
+            return device.DeviceOcppJ201(config['spec_identifier'])
+        else:
+            return device.DeviceOcppJ16(config['spec_identifier'])
