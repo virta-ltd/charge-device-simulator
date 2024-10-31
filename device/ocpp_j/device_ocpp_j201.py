@@ -274,8 +274,8 @@ What should I do? (enter the number + enter)
                 input2 = await aioconsole.ainput("Which evseId?\n")
                 input3 = await aioconsole.ainput("Which connector?\n")
                 await self.action_status_update_ocpp(input1, ** {
-                    'evseId': input2,
-                    'connectorId': input3,
+                    'evseId': int(input2),
+                    'connectorId': int(input3),
                 })
             elif input1 == "99":
                 input1 = input("Enter full custom message:\n")
