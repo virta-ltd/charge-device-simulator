@@ -1,15 +1,17 @@
 import datetime
+import sys
 import uuid
-import readline
 
 import aioconsole
 from device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
 from device.error_reasons import ErrorReasons
 
-# Fake call to readline module to make sure it is loaded
-# we need this since on OS-X if the readline module is not loaded, the input
-# from terminal using input() will be limited to small number of characters
-readline.get_completion_type()
+if sys.platform != "win32":
+    # Fake call to readline module to make sure it is loaded
+    # we need this since on OS-X if the readline module is not loaded, the input
+    # from terminal using input() will be limited to small number of characters
+    import readline
+    readline.get_completion_type()
 
 class DeviceOcppJ201(AbstractDeviceOcppJ):
     def __init__(self, device_id):
@@ -82,14 +84,9 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    charge_start_time = datetime.datetime.utcnow()
-    charge_meter_start = 1000
-
     async def action_charge_start(self, **options) -> bool:
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
-        self.charge_start_time = datetime.datetime.utcnow()
-        self.charge_meter_start = options.pop("meterStart", self.charge_meter_start)
         id_tag = options.pop("idTag", "-")
         evse_id = options.pop("evseId", 1)
         conenctor_id = options.pop("connectorId", 1)
@@ -97,7 +94,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         action = "TransactionEvent"
         json_payload = {
             "eventType": "Started",
-            "timestamp": self.utcnow_iso(),
+            "timestamp": options["chargeStartTime"],
             "triggerReason": "Authorized",
             "seqNo":0,
             "transactionInfo": {
@@ -108,14 +105,14 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 {
                     "sampledValue": [
                         {
-                            "value": self.charge_meter_start,
+                            "value": options["meterStart"],
                             "context":"Transaction.Begin",
                             "unitOfMeasure": {
-                                "unit":"kWh"
+                                "unit":"Wh"
                             }
                         }
                     ],
-                "timestamp":self.utcnow_iso()
+                "timestamp":options["chargeStartTime"]
                 }
             ],
             "evse": {
@@ -137,7 +134,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, meter_value: int = None, time_stamp: datetime = None, **options) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
         evse_id = options.pop("evseId", 1)
@@ -146,7 +143,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         action = "TransactionEvent"
         json_payload = {
             "eventType": "Updated",
-            "timestamp": self.utcnow_iso(),
+            "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
             "triggerReason": "ChargingStateChanged",
             "seqNo": self.charge_seq_no,
             "transactionInfo": {
@@ -157,16 +154,16 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 {
                     "sampledValue": [
                         {
-                            "value": self.charge_meter_value_current(**options),
+                            "value": meter_value if meter_value else self.charge_meter_value_current(**options),
                             "context":"Sample.Periodic",
                             "measurand": "Energy.Active.Import.Register",
                             "location": "Outlet",
                             "unitOfMeasure": {
-                                "unit":"kWh"
+                                "unit":"Wh"
                             }
                         }
                     ],
-                "timestamp":self.utcnow_iso()
+                "timestamp":time_stamp if time_stamp else self.utcnow_iso(),
                 }
             ],
             "evse": {
@@ -191,7 +188,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         key_name = "idTokenInfo"
         json_payload = {
             "eventType": "Ended",
-            "timestamp": self.utcnow_iso(),
+            "timestamp": options["chargeStopTime"],
             "triggerReason": "ChargingStateChanged",
             "seqNo": self.charge_seq_no,
             "transactionInfo": {
@@ -202,7 +199,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 {
                     "sampledValue": [
                         {
-                            "value": self.charge_meter_value_current(**options),
+                            "value": options["meterStop"],
                             "context":"Sample.Periodic",
                             "measurand": "Energy.Active.Import.Register",
                             "location": "Outlet",
@@ -211,7 +208,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                             }
                         }
                     ],
-                "timestamp":self.utcnow_iso()
+                "timestamp":options["chargeStopTime"],
                 }
             ],
             "evse": {
@@ -239,12 +236,20 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         if not await self.action_status_update("Occupied", **options):
             self.charge_in_progress = False
             return False
+        if "chargeStartTime" not in options:
+            options["chargeStartTime"] = self.utcnow_iso()
+        if "meterStart" not in options:
+            options["meterStart"] = 1000
         if not await self.action_charge_start(**options):
             self.charge_in_progress = False
             return False
         if not await self.flow_charge_ongoing_loop(auto_stop, **options):
             self.charge_in_progress = False
             return False
+        if "chargeStopTime" not in options:
+            options["chargeStopTime"] = self.utcnow_iso()
+        if "meterStop" not in options:
+            options["meterStop"] = self.charge_meter_value_current(**options)
         if not await self.action_charge_stop(**options):
             self.charge_in_progress = False
             return False

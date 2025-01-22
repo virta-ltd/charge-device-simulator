@@ -3,10 +3,10 @@ import datetime
 import json
 import logging
 import math
+import sys
 import typing
 import uuid
 import urllib.parse
-import readline
 
 import aioconsole
 import websockets
@@ -17,10 +17,12 @@ from device.error_reasons import ErrorReasons
 from device.ocpp_j.message_types import MessageTypes
 from model.error_message import ErrorMessage
 
-# Fake call to readline module to make sure it is loaded
-# we need this since on OS-X if the readline module is not loaded, the input
-# from terminal using input() will be limited to small number of characters
-readline.get_completion_type()
+if sys.platform != "win32":
+    # Fake call to readline module to make sure it is loaded
+    # we need this since on OS-X if the readline module is not loaded, the input
+    # from terminal using input() will be limited to small number of characters
+    import readline
+    readline.get_completion_type()
 
 class AbstractDeviceOcppJ(DeviceAbstract):
     server_address = ""
@@ -111,12 +113,9 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    charge_start_time = datetime.datetime.utcnow()
-    charge_meter_start = 1000
-
     def charge_meter_value_current(self, **options):
-        return math.floor(self.charge_meter_start + (
-            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+        return math.floor(options["meterStart"] + (
+            (self.utcnow() - datetime.datetime.fromisoformat(options["chargeStartTime"])).total_seconds() / 60
             * options.pop("chargedKwhPerMinute", 1)
             * 1000
         ))
@@ -143,6 +142,10 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not await self.action_authorize(**options):
             self.charge_in_progress = False
             return False
+        if "chargeStartTime" not in options:
+            options["chargeStartTime"] = self.utcnow_iso()
+        if "meterStart" not in options:
+            options["meterStart"] = 1000
         if not await self.action_charge_start(**options):
             self.charge_in_progress = False
             return False
@@ -158,6 +161,10 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not await self.action_status_update("Finishing", **options):
             self.charge_in_progress = False
             return False
+        if "chargeStopTime" not in options:
+            options["chargeStopTime"] = self.utcnow_iso()
+        if "meterStop" not in options:
+            options["meterStop"] = self.charge_meter_value_current(**options)
         if not await self.action_charge_stop(**options):
             self.charge_in_progress = False
             return False
