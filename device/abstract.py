@@ -115,7 +115,6 @@ class DeviceAbstract(abc.ABC):
                 await asyncio.sleep(i["secondsToSleep"])
                 if not await self.action_meter_value(meter_value=i["meterValue"], time_stamp=i["timestamp"], **options):
                     return False
-                await asyncio.sleep(i["secondsToSleep"])
             return True
         else:
             charge_loop_counter = 0
