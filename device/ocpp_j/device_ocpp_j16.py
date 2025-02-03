@@ -83,6 +83,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         return True
 
     async def action_charge_start(self, **options) -> bool:
+        self.fill_missing_options_charge_start(options)
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
         key_name = "idTagInfo"
@@ -128,6 +129,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         return True
 
     async def action_charge_stop(self, **options) -> bool:
+        self.fill_missing_options_charge_stop(options)
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
         key_name = "idTagInfo"

@@ -85,6 +85,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         return True
 
     async def action_charge_start(self, **options) -> bool:
+        self.fill_missing_options_charge_start(options)
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
         id_tag = options.pop("idTag", "-")
@@ -178,6 +179,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         return True
 
     async def action_charge_stop(self, **options) -> bool:
+        self.fill_missing_options_charge_stop(options)
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
         id_tag = options.pop("idTag", "-")
@@ -236,20 +238,12 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         if not await self.action_status_update("Occupied", **options):
             self.charge_in_progress = False
             return False
-        if "chargeStartTime" not in options:
-            options["chargeStartTime"] = self.utcnow_iso()
-        if "meterStart" not in options:
-            options["meterStart"] = 1000
         if not await self.action_charge_start(**options):
             self.charge_in_progress = False
             return False
         if not await self.flow_charge_ongoing_loop(auto_stop, **options):
             self.charge_in_progress = False
             return False
-        if "chargeStopTime" not in options:
-            options["chargeStopTime"] = self.utcnow_iso()
-        if "meterStop" not in options:
-            options["meterStop"] = self.charge_meter_value_current(**options)
         if not await self.action_charge_stop(**options):
             self.charge_in_progress = False
             return False

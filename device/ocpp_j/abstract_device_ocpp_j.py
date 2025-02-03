@@ -114,7 +114,20 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
+    def fill_missing_options_charge_start(self, options):
+        if "chargeStartTime" not in options:
+            options["chargeStartTime"] = self.utcnow_iso()
+        if "meterStart" not in options:
+            options["meterStart"] = 1000
+
+    def fill_missing_options_charge_stop(self, options):
+        if "chargeStopTime" not in options:
+            options["chargeStopTime"] = self.utcnow_iso()
+        if "meterStop" not in options:
+            options["meterStop"] = self.charge_meter_value_current(**options)
+
     def charge_meter_value_current(self, **options):
+        self.fill_missing_options_charge_start(options)
         return math.floor(options["meterStart"] + (
             (self.utcnow() - datetime.datetime.fromisoformat(options["chargeStartTime"])).total_seconds() / 60
             * options.pop("chargedKwhPerMinute", 1)
@@ -143,10 +156,6 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not await self.action_authorize(**options):
             self.charge_in_progress = False
             return False
-        if "chargeStartTime" not in options:
-            options["chargeStartTime"] = self.utcnow_iso()
-        if "meterStart" not in options:
-            options["meterStart"] = 1000
         if not await self.action_charge_start(**options):
             self.charge_in_progress = False
             return False
@@ -162,10 +171,6 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not await self.action_status_update("Finishing", **options):
             self.charge_in_progress = False
             return False
-        if "chargeStopTime" not in options:
-            options["chargeStopTime"] = self.utcnow_iso()
-        if "meterStop" not in options:
-            options["meterStop"] = self.charge_meter_value_current(**options)
         if not await self.action_charge_stop(**options):
             self.charge_in_progress = False
             return False
