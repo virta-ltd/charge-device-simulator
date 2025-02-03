@@ -1,4 +1,7 @@
 import datetime
+import logging
+import sys
+
 import readline
 
 import aioconsole
@@ -6,10 +9,12 @@ from device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
 
 from device.error_reasons import ErrorReasons
 
-# Fake call to readline module to make sure it is loaded
-# we need this since on OS-X if the readline module is not loaded, the input
-# from terminal using input() will be limited to small number of characters
-readline.get_completion_type()
+if sys.platform != "win32":
+    # Fake call to readline module to make sure it is loaded
+    # we need this since on OS-X if the readline module is not loaded, the input
+    # from terminal using input() will be limited to small number of characters
+    import readline
+    readline.get_completion_type()
 
 class DeviceOcppJ16(AbstractDeviceOcppJ):
     def __init__(self, device_id):
@@ -71,31 +76,26 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
 
-        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
+        if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
 
-    charge_start_time = datetime.datetime.utcnow()
-    charge_meter_start = 1000
-
     async def action_charge_start(self, **options) -> bool:
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
-        self.charge_start_time = datetime.datetime.utcnow()
-        self.charge_meter_start = options.pop("meterStart", self.charge_meter_start)
         key_name = "idTagInfo"
         id_tag = options.pop("idTag", "-")
         conenctor_id = options.pop("connectorId", 1)
         json_payload = {
-            "timestamp": self.utcnow_iso(),
+            "timestamp": options["chargeStartTime"],
             "connectorId": conenctor_id,
-            "meterStart": self.charge_meter_start,
+            "meterStart": options["meterStart"],
             "idTag": id_tag
         }
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
+        if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.charge_id = resp_json[2]['transactionId']
@@ -103,7 +103,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, meter_value: int = None, time_stamp: datetime = None, **options) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
         conenctor_id = options.pop("connectorId", 1)
@@ -111,13 +111,13 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             "connectorId": conenctor_id,
             "transactionId": self.charge_id,
             "meterValue": [{
-                "timestamp": self.utcnow_iso(),
+                "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
                 "sampledValue": [{
-                    "value": self.charge_meter_value_current(**options),
+                    "value": meter_value if meter_value else self.charge_meter_value_current(**options),
                     "context": "Sample.Periodic",
                     "measurand": "Energy.Active.Import.Register",
                     "location": "Outlet",
-                    "unit": "kWh"
+                    "unit": "Wh"
                 }]
             }]
         }
@@ -133,48 +133,17 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         key_name = "idTagInfo"
         id_tag = options.pop("idTag", "-")
         json_payload = {
-            "timestamp": self.utcnow_iso(),
+            "timestamp": options["chargeStopTime"],
             "transactionId": self.charge_id,
-            "meterStop": self.charge_meter_value_current(**options),
+            "meterStop": options["meterStop"],
             "idTag": id_tag,
             "reason": options.pop("stopReason", "Local")
         }        
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
+        if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
-        return True
-
-    async def flow_charge(self, auto_stop: bool, **options) -> bool:
-        log_title = self.flow_charge.__name__
-        self.logger.info(f"Flow {log_title} Start")
-        if not await self.action_authorize(**options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_charge_start(**options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Preparing", **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Charging", **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Finishing", **options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_charge_stop(**options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Available", **options):
-            self.charge_in_progress = False
-            return False
-        self.logger.info(f"Flow {log_title} End")
-        self.charge_in_progress = False
         return True
 
     async def loop_interactive_custom(self):

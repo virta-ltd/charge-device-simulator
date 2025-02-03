@@ -2,8 +2,9 @@ import abc
 import asyncio
 import datetime
 import logging
-import sys
 import os
+import sys
+
 from device.error_reasons import ErrorReasons
 
 
@@ -93,7 +94,6 @@ class DeviceAbstract(abc.ABC):
     async def flow_authorize(self, **options) -> bool:
         pass
 
-    @abc.abstractmethod
     async def flow_charge(self, auto_stop: bool, **options) -> bool:
         pass
 
@@ -102,20 +102,39 @@ class DeviceAbstract(abc.ABC):
         pass
 
     async def flow_charge_ongoing_loop(self, auto_stop: bool, **options):
-        charge_loop_counter = 0
-        while self.charge_in_progress:
-            await asyncio.sleep(15)
-            charge_loop_counter += 1
-            if not await self.flow_charge_ongoing_actions(**options):
-                return False
-            if auto_stop and charge_loop_counter >= 5:
-                break
-        await asyncio.sleep(5)
-        return True
+        if "meterValues" in options:
+            meter_values = options["meterValues"]
+            if (not isinstance(meter_values, list)
+                    or not all(isinstance(i, dict)
+                               and 'meterValue' in i
+                               and 'timestamp' in i
+                               and 'secondsToSleep' in i
+                               for i in meter_values)):
+                raise ValueError("meterValues must be a list of dictionaries with 'meterValue', 'timestamp' and 'secondsToSleep' keys.")
+            for i in meter_values:
+                await asyncio.sleep(i["secondsToSleep"])
+                if not await self.action_meter_value(meter_value=i["meterValue"], time_stamp=i["timestamp"], **options):
+                    return False
+            return True
+        else:
+            charge_loop_counter = 0
+            while self.charge_in_progress:
+                await asyncio.sleep(15)
+                charge_loop_counter += 1
+                if not await self.flow_charge_ongoing_actions(**options):
+                    return False
+                if auto_stop and charge_loop_counter >= 5:
+                    break
+            await asyncio.sleep(5)
+            return True
 
     @staticmethod
     def utcnow_iso() -> str:
         return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
+
+    @staticmethod
+    def utcnow() -> datetime:
+        return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
 
     @abc.abstractmethod
     async def loop_interactive_custom(self):
@@ -126,3 +145,7 @@ class DeviceAbstract(abc.ABC):
 
     def charge_can_stop(self, req_id):
         return self.charge_in_progress and self.charge_id == req_id
+
+    @abc.abstractmethod
+    def charge_meter_value_current(self, **options):
+        pass
