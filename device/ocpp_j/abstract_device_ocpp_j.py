@@ -24,6 +24,7 @@ if sys.platform != "win32":
     import readline
     readline.get_completion_type()
 
+
 class AbstractDeviceOcppJ(DeviceAbstract):
     server_address = ""
     __logger = logging.getLogger(__name__)
@@ -113,13 +114,26 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
+    def fill_missing_options_charge_start(self, options):
+        if "chargeStartTime" not in options:
+            options["chargeStartTime"] = self.utcnow_iso()
+        if "meterStart" not in options:
+            options["meterStart"] = 1000
+
+    def fill_missing_options_charge_stop(self, options):
+        if "chargeStopTime" not in options:
+            options["chargeStopTime"] = self.utcnow_iso()
+        if "meterStop" not in options:
+            options["meterStop"] = self.charge_meter_value_current(**options)
+
     def charge_meter_value_current(self, **options):
+        self.fill_missing_options_charge_start(options)
         return math.floor(options["meterStart"] + (
             (self.utcnow() - datetime.datetime.fromisoformat(options["chargeStartTime"])).total_seconds() / 60
             * options.pop("chargedKwhPerMinute", 1)
             * 1000
         ))
-    
+
     async def flow_heartbeat(self) -> bool:
         log_title = self.flow_heartbeat.__name__
         self.logger.info(f"Flow {log_title} Start")
@@ -127,7 +141,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
-    
+
     async def flow_authorize(self, **options) -> bool:
         log_title = self.flow_authorize.__name__
         self.logger.info(f"Flow {log_title} Start")
@@ -142,10 +156,6 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not await self.action_authorize(**options):
             self.charge_in_progress = False
             return False
-        if "chargeStartTime" not in options:
-            options["chargeStartTime"] = self.utcnow_iso()
-        if "meterStart" not in options:
-            options["meterStart"] = 1000
         if not await self.action_charge_start(**options):
             self.charge_in_progress = False
             return False
@@ -161,10 +171,6 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not await self.action_status_update("Finishing", **options):
             self.charge_in_progress = False
             return False
-        if "chargeStopTime" not in options:
-            options["chargeStopTime"] = self.utcnow_iso()
-        if "meterStop" not in options:
-            options["meterStop"] = self.charge_meter_value_current(**options)
         if not await self.action_charge_stop(**options):
             self.charge_in_progress = False
             return False
@@ -237,6 +243,10 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         pass
 
     async def by_middleware_req(self, req_id: str, req_action: str, req_payload: typing.Any):
+        # We must not block the event loop here for anything beside sending a response
+        # since this is the main event loop for the device checking for websocket messages
+        # If we need to do something that blocks or takes time, we must create a new task for it
+        next_async_task = None
         resp_payload = None
         if req_action in map(lambda x: str(x).lower(), [
             "ClearCache",
@@ -279,23 +289,17 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 resp_payload = {
                     "status": "Accepted"
                 }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
-                await self.action_meter_value(**options)
-                return
+                next_async_task = self.action_meter_value(**options)
             if req_payload["requestedMessage"] == "BootNotification":
                 resp_payload = {
                     "status": "Accepted"
                 }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
-                await self.action_register()
-                return
+                next_async_task = self.action_register()
             if req_payload["requestedMessage"] == "Heartbeat":
                 resp_payload = {
                     "status": "Accepted"
                 }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
-                await self.action_heart_beat()
-                return
+                next_async_task = await self.action_heart_beat()
             if req_payload["requestedMessage"] == "StatusNotification":
                 options = {
                     "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
@@ -303,12 +307,10 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 resp_payload = {
                     "status": "Accepted"
                 }
-                await self.by_middleware_req_response_ready(req_id, resp_payload);
                 if self.charge_in_progress:
-                    await self.action_status_update("Charging",**options)
+                    next_async_task = await self.action_status_update("Charging", **options)
                 else:
-                    await self.action_status_update("Available",**options)
-                return
+                    next_async_task = await self.action_status_update("Available", **options)
         if req_action == "RemoteStartTransaction".lower():
             if not self.charge_can_start():
                 resp_payload["status"] = "Rejected"
@@ -318,21 +320,23 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                     "idTag": req_payload["idTag"] if "idTag" in req_payload else "-",
                 }
                 self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
-                asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
+                next_async_task = utility.run_with_delay(self.flow_charge(False, **options), 2)
 
         if req_action == "RemoteStopTransaction".lower():
             if not self.charge_can_stop(req_payload["transactionId"] if "transactionId" in req_payload else 0):
                 resp_payload["status"] = "Rejected"
             else:
-                asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
+                next_async_task = utility.run_with_delay(self.flow_charge_stop(), 2)
 
         if req_action == "Reset".lower():
-            asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
+            next_async_task = utility.run_with_delay(self.re_initialize(), 2)
 
         if resp_payload is None:
             self.logger.warning(f"Device Read, Request, Unknown or not supported: {req_action}")
             return
         await self.by_middleware_req_response_ready(req_id, resp_payload)
+        if next_async_task is not None:
+            asyncio.create_task(next_async_task)
 
     async def by_middleware_req_response_ready(self, req_id, resp_payload):
         if resp_payload is None:
