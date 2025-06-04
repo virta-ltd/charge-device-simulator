@@ -4,6 +4,9 @@ simulations:
     device_name: test-ocpp-j-1 # Device name to be used on this simulation (it can be a name of any of devices defined below)
     flow_charge_options: # Options passing to charge start when a charge flow gets started
       idTag: "FAKE_RFID" # The idTag to be used for authorization
+      autoActionsLoopDelayInSeconds: 15 # (Optional) Delay between each set of actions (loop) running while the charge flow is running
+      autoActionsLoopCount: 5 # (Optional) How many times the loop should run
+      autoActionsLoopDisableMeterValues: false # (Optional) If true, meter values will not be sent during the loop
     is_interactive: false # If true, you can ask for different flows and commands while the simulation is running using your keyboard
     error_exit: false # If true (default), the app will crash if a response is not succeeded (will be set on target device)
     frequent_flow_enabled: true # If true, flows defined below will be run frequently using defined options

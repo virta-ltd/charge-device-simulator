@@ -34,7 +34,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.spec_vendor = None
 
     @property
-    def logger(self) -> logging:
+    def logger(self) -> logging.Logger:
         return self.__logger
 
     # noinspection PyBroadException
@@ -251,8 +251,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         return True
 
     async def flow_charge_ongoing_actions(self, **options) -> bool:
-        if not await self.action_meter_value(**options):
-            self.logger.warning(f"Flow charge, meter values not success")
+        if not options.get("autoActionsLoopDisableMeterValues", False):
+            if not await self.action_meter_value(**options):
+                self.logger.warning(f"Flow charge, meter values not success")
         return await self.action_status_update("1", **options)
 
     async def by_device_req_send(self, action, json_payload, valid_ids: typing.Sequence = None):

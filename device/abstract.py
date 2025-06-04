@@ -22,7 +22,7 @@ class DeviceAbstract(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def logger(self) -> logging:
+    def logger(self) -> logging.Logger:
         pass
 
     @abc.abstractmethod
@@ -94,6 +94,7 @@ class DeviceAbstract(abc.ABC):
     async def flow_authorize(self, **options) -> bool:
         pass
 
+    @abc.abstractmethod
     async def flow_charge(self, auto_stop: bool, **options) -> bool:
         pass
 
@@ -117,24 +118,26 @@ class DeviceAbstract(abc.ABC):
                     return False
             return True
         else:
+            charge_loop_wait_seconds = options.get("autoActionsLoopDelayInSeconds", 15)
+            charge_loop_max = options.get("autoActionsLoopCount", 5)
             charge_loop_counter = 0
             while self.charge_in_progress:
-                await asyncio.sleep(15)
+                await asyncio.sleep(charge_loop_wait_seconds)
                 charge_loop_counter += 1
                 if not await self.flow_charge_ongoing_actions(**options):
                     return False
-                if auto_stop and charge_loop_counter >= 5:
+                if auto_stop and charge_loop_counter >= charge_loop_max:
                     break
             await asyncio.sleep(5)
             return True
 
     @staticmethod
     def utcnow_iso() -> str:
-        return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
+        return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     @staticmethod
-    def utcnow() -> datetime:
-        return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+    def utcnow() -> datetime.datetime:
+        return datetime.datetime.now(datetime.timezone.utc)
 
     @abc.abstractmethod
     async def loop_interactive_custom(self):
