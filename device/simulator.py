@@ -15,7 +15,7 @@ class Simulator:
     __logger = logging.getLogger(__name__)
 
     @property
-    def logger(self) -> logging:
+    def logger(self) -> logging.Logger:
         return self.__logger
 
     is_ended = False

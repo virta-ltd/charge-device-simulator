@@ -43,7 +43,7 @@ class DeviceOcppS(DeviceAbstract):
         self.spec_chargePointSerialNumber = None
 
     @property
-    def logger(self) -> logging:
+    def logger(self) -> logging.Logger:
         return self.__logger
 
     async def initialize(self) -> bool:
@@ -293,6 +293,8 @@ class DeviceOcppS(DeviceAbstract):
         return True
 
     async def flow_charge_ongoing_actions(self, **options) -> bool:
+        if "autoActionsLoopDisableMeterValues" in options and options["autoActionsLoopDisableMeterValues"] == True:
+            return True
         return await self.action_meter_value(**options)
 
     async def by_device_req_send(self, action, req_payload) -> typing.Any:
