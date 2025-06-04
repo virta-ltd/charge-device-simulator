@@ -251,7 +251,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         return True
 
     async def flow_charge_ongoing_actions(self, **options) -> bool:
-        if options.get("autoActionsLoopDisableMeterValues", False) != True:
+        if not options.get("autoActionsLoopDisableMeterValues", False):
             if not await self.action_meter_value(**options):
                 self.logger.warning(f"Flow charge, meter values not success")
         return await self.action_status_update("1", **options)

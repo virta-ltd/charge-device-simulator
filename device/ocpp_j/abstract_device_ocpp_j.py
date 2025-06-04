@@ -182,7 +182,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         return True
 
     async def flow_charge_ongoing_actions(self, **options) -> bool:
-        if "autoActionsLoopDisableMeterValues" in options and options["autoActionsLoopDisableMeterValues"] == True:
+        if options.get("autoActionsLoopDisableMeterValues", False):
             return True
         return await self.action_meter_value(**options)
 

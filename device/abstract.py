@@ -133,11 +133,11 @@ class DeviceAbstract(abc.ABC):
 
     @staticmethod
     def utcnow_iso() -> str:
-        return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=datetime.timezone.utc).isoformat()
+        return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     @staticmethod
     def utcnow() -> datetime.datetime:
-        return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=datetime.timezone.utc)
+        return datetime.datetime.now(datetime.timezone.utc)
 
     @abc.abstractmethod
     async def loop_interactive_custom(self):
