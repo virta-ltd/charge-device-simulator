@@ -1,4 +1,4 @@
-# Device Simulator ![Docker Hub Image Release](https://github.com/virta-ltd/charge-device-simulator/workflows/Docker%20Hub%20Image%20Release/badge.svg?branch=master)
+# Device Simulator [![Docker Hub Image Release](https://github.com/virta-ltd/charge-device-simulator/actions/workflows/docker-hub.yml/badge.svg)](https://github.com/virta-ltd/charge-device-simulator/actions/workflows/docker-hub.yml)
 
 ## Docker Hub
 Latest version image: <b>virtaltd/charge-device-simulator:latest</b>  
