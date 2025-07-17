@@ -3,3 +3,4 @@ coloredlogs
 aioconsole
 pyyaml
 zeep[async]
+certifi
