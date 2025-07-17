@@ -7,6 +7,8 @@ import sys
 import typing
 import uuid
 import urllib.parse
+import ssl
+import certifi
 
 import aioconsole
 import websockets
@@ -57,10 +59,18 @@ class AbstractDeviceOcppJ(DeviceAbstract):
             logging.getLogger('websockets.protocol').setLevel(logging.WARNING)
             server_url = f"{self.server_address}/{urllib.parse.quote(self.deviceId)}"
             self.logger.info(f"Trying to connect.\nURL: {server_url}\nClient supported protocols: {json.dumps(self.protocols)}")
-            self._ws = await websockets.connect(
-                server_url,
-                subprotocols=[websockets.Subprotocol(p) for p in self.protocols]
-            )
+            if server_url.startswith("wss://"):
+                ssl_context = ssl.create_default_context(cafile=certifi.where())
+                self._ws = await websockets.connect(
+                    server_url,
+                    subprotocols=[websockets.Subprotocol(p) for p in self.protocols],
+                    ssl=ssl_context
+                )
+            else:
+                self._ws = await websockets.connect(
+                    server_url,
+                    subprotocols=[websockets.Subprotocol(p) for p in self.protocols]
+                )
             self.logger.info(f"Connected with protocol: {self._ws.subprotocol}")
             self.__loop_internal_task = asyncio.create_task(self.__loop_internal())
             self.__ws_close_task = asyncio.create_task(self.__ws_close())
