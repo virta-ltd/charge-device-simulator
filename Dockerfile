@@ -1,4 +1,4 @@
-FROM python:3.7-alpine
+FROM python:3.11-alpine
 RUN apk add --update --no-cache --virtual .build-deps g++ gcc libxml2-dev libxslt-dev python3-dev && \
     apk add --no-cache libxslt && \
     pip install --no-cache-dir lxml>=3.5.0 && \
