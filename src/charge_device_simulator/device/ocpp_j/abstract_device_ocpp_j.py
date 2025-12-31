@@ -13,11 +13,11 @@ import certifi
 import aioconsole
 import websockets
 
-from device import utility
-from device.abstract import DeviceAbstract
-from device.error_reasons import ErrorReasons
-from device.ocpp_j.message_types import MessageTypes
-from model.error_message import ErrorMessage
+from .. import utility
+from ..abstract import DeviceAbstract
+from ..error_reasons import ErrorReasons
+from .message_types import MessageTypes
+from ...model.error_message import ErrorMessage
 
 if sys.platform != "win32":
     # Fake call to readline module to make sure it is loaded

@@ -8,15 +8,15 @@ from urllib import parse
 
 import aioconsole
 
-import device.abstract
-from device import utility
-from device.ensto.pending_req import PendingReq
-from device.error_reasons import ErrorReasons
-from model.error_message import ErrorMessage
+from .. import abstract as device_abstract
+from .. import utility
+from .pending_req import PendingReq
+from ..error_reasons import ErrorReasons
+from ...model.error_message import ErrorMessage
 
 
 # noinspection DuplicatedCode
-class DeviceEnsto(device.abstract.DeviceAbstract):
+class DeviceEnsto(device_abstract.DeviceAbstract):
     server_host = ""
     server_port = 3000
     __logger = logging.getLogger(__name__)

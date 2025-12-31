@@ -3,11 +3,11 @@ from unittest.mock import MagicMock, AsyncMock
 
 import pytest
 
-from device.ensto.device_ensto import DeviceEnsto
-from device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
-from device.ocpp_j.device_ocpp_j16 import DeviceOcppJ16
-from device.ocpp_j.device_ocpp_j201 import DeviceOcppJ201
-from device.ocpp_s.device_ocpp_s import DeviceOcppS
+from charge_device_simulator.device.ensto.device_ensto import DeviceEnsto
+from charge_device_simulator.device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
+from charge_device_simulator.device.ocpp_j.device_ocpp_j16 import DeviceOcppJ16
+from charge_device_simulator.device.ocpp_j.device_ocpp_j201 import DeviceOcppJ201
+from charge_device_simulator.device.ocpp_s.device_ocpp_s import DeviceOcppS
 
 # Configure pytest-asyncio
 pytest_plugins = ('pytest_asyncio',)

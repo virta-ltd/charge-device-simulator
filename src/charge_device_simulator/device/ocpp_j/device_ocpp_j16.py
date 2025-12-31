@@ -2,8 +2,8 @@ import sys
 
 import aioconsole
 
-from device.error_reasons import ErrorReasons
-from device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
+from ..error_reasons import ErrorReasons
+from .abstract_device_ocpp_j import AbstractDeviceOcppJ
 
 if sys.platform != "win32":
     # Fake call to readline module to make sure it is loaded

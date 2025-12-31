@@ -4,8 +4,8 @@ import typing
 
 import aioconsole
 
-from device.error_reasons import ErrorReasons
-from model.error_message import ErrorMessage
+from .error_reasons import ErrorReasons
+from ..model.error_message import ErrorMessage
 from .abstract import DeviceAbstract
 from .flows import Flows
 from .frequent_flow_options import FrequentFlowOptions

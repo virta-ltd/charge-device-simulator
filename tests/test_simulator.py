@@ -2,10 +2,10 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
-from device.error_reasons import ErrorReasons
-from device.flows import Flows
-from device.frequent_flow_options import FrequentFlowOptions
-from device.simulator import Simulator
+from charge_device_simulator.device.error_reasons import ErrorReasons
+from charge_device_simulator.device.flows import Flows
+from charge_device_simulator.device.frequent_flow_options import FrequentFlowOptions
+from charge_device_simulator.device.simulator import Simulator
 
 
 @pytest.fixture

@@ -8,12 +8,12 @@ import typing
 import uuid
 
 import aioconsole
-from device import utility
-from device.abstract import DeviceAbstract
-from device.error_reasons import ErrorReasons
-from device.ocpp_j.message_types import MessageTypes
-from device.ocpp_s.wsa_extension_plugin import WsAddressingExtensionPlugin
-from model.error_message import ErrorMessage
+from .. import utility
+from ..abstract import DeviceAbstract
+from ..error_reasons import ErrorReasons
+from ..ocpp_j.message_types import MessageTypes
+from .wsa_extension_plugin import WsAddressingExtensionPlugin
+from ...model.error_message import ErrorMessage
 from zeep import xsd
 from zeep.client import AsyncClient, Client
 from zeep.proxy import ServiceProxy

@@ -2,7 +2,7 @@ import datetime
 import math
 from unittest.mock import patch
 
-from device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
+from charge_device_simulator.device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
 
 
 class TestChargeMeterValueCurrent:

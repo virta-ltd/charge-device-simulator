@@ -2,7 +2,7 @@ import datetime
 import math
 from unittest.mock import patch
 
-from device.ocpp_s.device_ocpp_s import DeviceOcppS
+from charge_device_simulator.device.ocpp_s.device_ocpp_s import DeviceOcppS
 
 
 class TestDeviceOcppSChargeMeterValue:
@@ -63,7 +63,6 @@ class TestDeviceOcppSChargeMeterValue:
         results = [result1]
         for minutes in [1, 2, 3]:
             current_time = fixed_time + datetime.timedelta(minutes=minutes)
-            options["chargedKwhPerMinute"] = 1  # Re-add since it gets used
             with patch.object(DeviceOcppS, 'utcnow', return_value=current_time):
                 results.append(device_ocpp_s.charge_meter_value_current(options))
 

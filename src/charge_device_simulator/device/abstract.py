@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 
-from device.error_reasons import ErrorReasons
+from .error_reasons import ErrorReasons
 
 
 class DeviceAbstract(abc.ABC):

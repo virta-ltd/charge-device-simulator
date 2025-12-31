@@ -1,8 +1,8 @@
 import argparse
 from typing import Any, Dict
 
-from device import ErrorReasons, Simulator
-from model import ErrorMessage
+from ..device import ErrorReasons, Simulator
+from ..model import ErrorMessage
 
 from .config_file_reader import ConfigFileReader
 

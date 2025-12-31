@@ -1,7 +1,7 @@
 import yaml
 from typing import Any, Dict, List, Optional
 from .config_parser import ConfigParser
-import device
+from .. import device
 
 
 class ConfigFileReader:

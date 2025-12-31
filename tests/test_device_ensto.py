@@ -1,8 +1,7 @@
 import datetime
-import math
 from unittest.mock import patch
 
-from device.ensto.device_ensto import DeviceEnsto
+from charge_device_simulator.device.ensto.device_ensto import DeviceEnsto
 
 
 class TestDeviceEnstoChargeMeterValue:
@@ -49,7 +48,6 @@ class TestDeviceEnstoChargeMeterValue:
         results = [result1]
         for minutes in [1, 2, 3]:
             current_time = fixed_time + datetime.timedelta(minutes=minutes)
-            options["chargedKwhPerMinute"] = 1  # Re-add since it gets used
             with patch.object(DeviceEnsto, 'utcnow', return_value=current_time):
                 results.append(device_ensto.charge_meter_value_current(options))
 

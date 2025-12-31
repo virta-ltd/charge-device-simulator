@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 import coloredlogs
-from runtime import ExecutorCli
+from charge_device_simulator.runtime import ExecutorCli
 
 coloredlogs.install(logging.DEBUG)
 executor = ExecutorCli()
