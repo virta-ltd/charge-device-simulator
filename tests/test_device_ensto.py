@@ -1,52 +1,57 @@
 import datetime
+import math
 from unittest.mock import patch
+
+from device.ensto.device_ensto import DeviceEnsto
 
 
 class TestDeviceEnstoChargeMeterValue:
     """Tests for DeviceEnsto.charge_meter_value_current method.
 
-    Like OCPP-S, Ensto uses instance variables (charge_start_time, charge_meter_start)
-    instead of the options dict for tracking charge state.
+    Now uses options dict pattern (like OCPP-J) instead of instance variables.
     """
 
-    def test_meter_value_no_time_elapsed(self, device_ensto):
+    def test_meter_value_no_time_elapsed(self, device_ensto, fixed_time):
         """Test meter value when no time has elapsed."""
-        start_time = datetime.datetime(2025, 1, 15, 12, 0, 0)
-        device_ensto.charge_start_time = start_time
-        device_ensto.charge_meter_start = 1000
-
-        with patch('datetime.datetime') as mock_datetime:
-            mock_datetime.utcnow.return_value = start_time
-            result = device_ensto.charge_meter_value_current({})
+        with patch.object(DeviceEnsto, 'utcnow', return_value=fixed_time):
+            result = device_ensto.charge_meter_value_current({
+                "meterStart": 1000,
+                "chargeStartTime": fixed_time.isoformat()
+            })
 
         assert result == 1000
 
-    def test_meter_value_after_one_minute(self, device_ensto):
+    def test_meter_value_after_one_minute(self, device_ensto, fixed_time):
         """Test meter value after 1 minute at default rate (1 kWh/min)."""
-        start_time = datetime.datetime(2025, 1, 15, 12, 0, 0)
-        current_time = datetime.datetime(2025, 1, 15, 12, 1, 0)
-        device_ensto.charge_start_time = start_time
-        device_ensto.charge_meter_start = 1000
+        current_time = fixed_time + datetime.timedelta(minutes=1)
 
-        with patch('datetime.datetime') as mock_datetime:
-            mock_datetime.utcnow.return_value = current_time
-            result = device_ensto.charge_meter_value_current({})
+        with patch.object(DeviceEnsto, 'utcnow', return_value=current_time):
+            result = device_ensto.charge_meter_value_current({
+                "meterStart": 1000,
+                "chargeStartTime": fixed_time.isoformat()
+            })
 
         # 1000 + (1 min * 1 kWh/min * 1000) = 2000
         assert result == 2000
 
-    def test_progressive_meter_values(self, device_ensto):
+    def test_progressive_meter_values(self, device_ensto, fixed_time):
         """Test that progressive calls return increasing values."""
-        start_time = datetime.datetime(2025, 1, 15, 12, 0, 0)
-        device_ensto.charge_start_time = start_time
-        device_ensto.charge_meter_start = 1000
+        options = {"meterStart": 1000, "chargedKwhPerMinute": 1}
 
-        results = []
-        for minutes in [0, 1, 2, 3]:
-            current_time = start_time + datetime.timedelta(minutes=minutes)
-            with patch('datetime.datetime') as mock_datetime:
-                mock_datetime.utcnow.return_value = current_time
-                results.append(device_ensto.charge_meter_value_current({"chargedKwhPerMinute": 1}))
+        # First call - sets chargeStartTime
+        with patch.object(DeviceEnsto, 'utcnow', return_value=fixed_time), \
+             patch.object(DeviceEnsto, 'utcnow_iso', return_value=fixed_time.isoformat()):
+            result1 = device_ensto.charge_meter_value_current(options)
+
+        assert result1 == 1000
+        assert "chargeStartTime" in options
+
+        results = [result1]
+        for minutes in [1, 2, 3]:
+            current_time = fixed_time + datetime.timedelta(minutes=minutes)
+            options["chargedKwhPerMinute"] = 1  # Re-add since it gets used
+            with patch.object(DeviceEnsto, 'utcnow', return_value=current_time):
+                results.append(device_ensto.charge_meter_value_current(options))
 
         assert results == [1000, 2000, 3000, 4000]
 
@@ -110,3 +115,32 @@ class TestDeviceEnstoPrepareAuthorizeParams:
         assert "rfid" in options
         assert options["rfid"] == "TEST"
         assert options["other_key"] == "value"
+
+
+class TestDeviceEnstoOptionsPersistence:
+    """Tests to verify that options dict modifications persist to caller."""
+
+    def test_fill_missing_options_charge_start_persists(self, device_ensto, fixed_time):
+        """Test that fill_missing_options_charge_start modifies the original dict."""
+        options = {}
+
+        with patch.object(DeviceEnsto, 'utcnow_iso', return_value=fixed_time.isoformat()):
+            device_ensto.fill_missing_options_charge_start(options)
+
+        # Verify the options dict was modified
+        assert "chargeStartTime" in options
+        assert options["chargeStartTime"] == fixed_time.isoformat()
+        assert "meterStart" in options
+        assert options["meterStart"] == 1000
+
+    def test_fill_missing_options_charge_stop_persists(self, device_ensto, fixed_time):
+        """Test that fill_missing_options_charge_stop modifies the original dict."""
+        options = {"meterStart": 1000, "chargeStartTime": fixed_time.isoformat()}
+
+        with patch.object(DeviceEnsto, 'utcnow', return_value=fixed_time), \
+             patch.object(DeviceEnsto, 'utcnow_iso', return_value=fixed_time.isoformat()):
+            device_ensto.fill_missing_options_charge_stop(options)
+
+        # Verify meterStop was added
+        assert "meterStop" in options
+        assert "chargeStopTime" in options

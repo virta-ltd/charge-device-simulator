@@ -137,14 +137,22 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                 json_payload["idtag"] = options_id_tag
         pass
 
-    charge_start_time = datetime.datetime.utcnow()
-    charge_meter_start = 1000
+    def fill_missing_options_charge_start(self, options):
+        if "chargeStartTime" not in options:
+            options["chargeStartTime"] = self.utcnow_iso()
+        if "meterStart" not in options:
+            options["meterStart"] = 1000
+
+    def fill_missing_options_charge_stop(self, options):
+        if "chargeStopTime" not in options:
+            options["chargeStopTime"] = self.utcnow_iso()
+        if "meterStop" not in options:
+            options["meterStop"] = self.charge_meter_value_current(options)
 
     async def action_charge_start(self, options: dict) -> bool:
         action = "charge_start"
         self.logger.info(f"Action {action} Start")
-        self.charge_start_time = datetime.datetime.utcnow()
-        self.charge_meter_start = options.get("meterStart", self.charge_meter_start)
+        self.fill_missing_options_charge_start(options)
         json_payload = {
             'id': 5,
             "chg": 2,
@@ -160,8 +168,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         return True
 
     def charge_meter_value_current(self, options: dict):
-        return math.floor(self.charge_meter_start + (
-            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+        self.fill_missing_options_charge_start(options)
+        return math.floor(options["meterStart"] + (
+            (self.utcnow() - datetime.datetime.fromisoformat(options["chargeStartTime"])).total_seconds() / 60
             * options.get("chargedKwhPerMinute", 1)
             * 1000
         ))
@@ -169,12 +178,13 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: str = None) -> bool:
         action = "meter_value"
         self.logger.info(f"Action {action} Start")
+        self.fill_missing_options_charge_start(options)
         json_payload = {
             'id': 43,
             "out": options.get("connectorId", 1),
-            "time": datetime.datetime.utcnow().timestamp() if time_stamp is None else time_stamp,
+            "time": self.utcnow().timestamp() if time_stamp is None else time_stamp,
             "t": 382,
-            "eem": (meter_value if meter_value else self.charge_meter_value_current(options)) - self.charge_meter_start,
+            "eem": (meter_value if meter_value else self.charge_meter_value_current(options)) - options["meterStart"],
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
@@ -186,12 +196,13 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def action_charge_stop(self, options: dict) -> bool:
         action = "charge_stop"
         self.logger.info(f"Action {action} Start")
+        self.fill_missing_options_charge_start(options)
         json_payload = {
             'id': 6,
             "idtag": options.get("idTag", "-"),
             "chg": 0,
             "out": options.get("connectorId", 1),
-            "kwh": (self.charge_meter_value_current(options) - self.charge_meter_start) / 1000,
+            "kwh": (self.charge_meter_value_current(options) - options["meterStart"]) / 1000,
             "timestamp": self.utcnow_iso(),
         }
         resp_json = await self.by_device_req_send(action, json_payload)

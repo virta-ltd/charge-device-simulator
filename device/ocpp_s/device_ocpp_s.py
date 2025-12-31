@@ -174,18 +174,26 @@ class DeviceOcppS(DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    charge_start_time = datetime.datetime.utcnow()
-    charge_meter_start = 1000
+    def fill_missing_options_charge_start(self, options):
+        if "chargeStartTime" not in options:
+            options["chargeStartTime"] = self.utcnow_iso()
+        if "meterStart" not in options:
+            options["meterStart"] = 1000
+
+    def fill_missing_options_charge_stop(self, options):
+        if "chargeStopTime" not in options:
+            options["chargeStopTime"] = self.utcnow_iso()
+        if "meterStop" not in options:
+            options["meterStop"] = self.charge_meter_value_current(options)
 
     async def action_charge_start(self, options: dict) -> bool:
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
-        self.charge_start_time = datetime.datetime.utcnow()
-        self.charge_meter_start = options.get("meterStart", self.charge_meter_start)
+        self.fill_missing_options_charge_start(options)
         req_payload = {
-            "timestamp": self.utcnow_iso(),
+            "timestamp": options["chargeStartTime"],
             "connectorId": options.get("connectorId", 1),
-            "meterStart": self.charge_meter_start,
+            "meterStart": options["meterStart"],
             "idTag": options.get("idTag", "-")
         }
         resp_payload = await self.by_device_req_send(action, req_payload)
@@ -198,8 +206,9 @@ class DeviceOcppS(DeviceAbstract):
         return True
 
     def charge_meter_value_current(self, options: dict):
-        return math.floor(self.charge_meter_start + (
-            (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
+        self.fill_missing_options_charge_start(options)
+        return math.floor(options["meterStart"] + (
+            (self.utcnow() - datetime.datetime.fromisoformat(options["chargeStartTime"])).total_seconds() / 60
             * options.get("chargedKwhPerMinute", 1)
             * 1000
         ))
