@@ -128,11 +128,11 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         return True
 
     def prepare_authorize_params(self, json_payload, options: dict):
-        options_rfid = options.pop("rfid", None)
+        options_rfid = options.get("rfid", None)
         if options_rfid is not None:
             json_payload["rfid"] = options_rfid
         else:
-            options_id_tag = options.pop("idTag", None)
+            options_id_tag = options.get("idTag", None)
             if options_id_tag is not None:
                 json_payload["idtag"] = options_id_tag
         pass
@@ -144,11 +144,11 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         action = "charge_start"
         self.logger.info(f"Action {action} Start")
         self.charge_start_time = datetime.datetime.utcnow()
-        self.charge_meter_start = options.pop("meterStart", self.charge_meter_start)
+        self.charge_meter_start = options.get("meterStart", self.charge_meter_start)
         json_payload = {
             'id': 5,
             "chg": 2,
-            "out": options.pop("connectorId", 1),
+            "out": options.get("connectorId", 1),
         }
         self.prepare_authorize_params(json_payload, options)
         resp_json = await self.by_device_req_send(action, json_payload)
@@ -162,7 +162,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     def charge_meter_value_current(self, options: dict):
         return math.floor(self.charge_meter_start + (
             (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
-            * options.pop("chargedKwhPerMinute", 1)
+            * options.get("chargedKwhPerMinute", 1)
             * 1000
         ))
 
@@ -171,7 +171,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 43,
-            "out": options.pop("connectorId", 1),
+            "out": options.get("connectorId", 1),
             "time": datetime.datetime.utcnow().timestamp() if time_stamp is None else time_stamp,
             "t": 382,
             "eem": (meter_value if meter_value else self.charge_meter_value_current(options)) - self.charge_meter_start,
@@ -188,9 +188,9 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 6,
-            "idtag": options.pop("idTag", "-"),
+            "idtag": options.get("idTag", "-"),
             "chg": 0,
-            "out": options.pop("connectorId", 1),
+            "out": options.get("connectorId", 1),
             "kwh": (self.charge_meter_value_current(options) - self.charge_meter_start) / 1000,
             "timestamp": self.utcnow_iso(),
         }
@@ -223,7 +223,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not options.pop("is_remote_started", False):
+        if not options.get("is_remote_started", False):
             if not await self.action_authorize(options):
                 self.charge_in_progress = False
                 return False

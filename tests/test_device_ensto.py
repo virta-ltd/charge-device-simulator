@@ -65,7 +65,7 @@ class TestDeviceEnstoPrepareAuthorizeParams:
         device_ensto.prepare_authorize_params(json_payload, options)
 
         assert json_payload["rfid"] == "12345678"
-        assert "rfid" not in options  # popped from options
+        assert "rfid" in options  # NOT removed from options (using get, not pop)
 
     def test_extracts_idtag_when_no_rfid(self, device_ensto):
         """Test that idTag is extracted when rfid is not present."""
@@ -75,7 +75,7 @@ class TestDeviceEnstoPrepareAuthorizeParams:
         device_ensto.prepare_authorize_params(json_payload, options)
 
         assert json_payload["idtag"] == "ABC123"  # Note: lowercase 'idtag'
-        assert "idTag" not in options  # popped from options
+        assert "idTag" in options  # NOT removed from options (using get, not pop)
 
     def test_rfid_takes_precedence_over_idtag(self, device_ensto):
         """Test that rfid is used when both rfid and idTag are present."""
@@ -86,8 +86,8 @@ class TestDeviceEnstoPrepareAuthorizeParams:
 
         assert json_payload["rfid"] == "RFID123"
         assert "idtag" not in json_payload  # idTag not extracted
-        assert "rfid" not in options  # popped
-        assert "idTag" in options  # NOT popped (rfid took precedence)
+        assert "rfid" in options  # NOT removed (using get, not pop)
+        assert "idTag" in options  # NOT removed (using get, not pop)
 
     def test_no_auth_params_when_empty_options(self, device_ensto):
         """Test behavior when options has neither rfid nor idTag."""
@@ -99,15 +99,14 @@ class TestDeviceEnstoPrepareAuthorizeParams:
         assert "rfid" not in json_payload
         assert "idtag" not in json_payload
 
-    def test_options_dict_is_modified(self, device_ensto):
-        """Test that the options dict is modified (values popped)."""
+    def test_options_dict_not_modified(self, device_ensto):
+        """Test that the options dict is NOT modified (values NOT popped)."""
         json_payload = {}
-        original_options = {"rfid": "TEST", "other_key": "value"}
-        options = original_options.copy()
         options = {"rfid": "TEST", "other_key": "value"}
 
         device_ensto.prepare_authorize_params(json_payload, options)
 
-        # rfid should be removed, other_key should remain
-        assert "rfid" not in options
+        # Both keys should remain in options (using get, not pop)
+        assert "rfid" in options
+        assert options["rfid"] == "TEST"
         assert options["other_key"] == "value"

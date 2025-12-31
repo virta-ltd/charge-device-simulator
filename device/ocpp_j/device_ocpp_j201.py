@@ -55,8 +55,8 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
-            "connectorId": options.pop("connectorId", 1),
-            "evseId": options.pop("evseId", 1),
+            "connectorId": options.get("connectorId", 1),
+            "evseId": options.get("evseId", 1),
             "connectorStatus": status,
             "timestamp": self.utcnow_iso()
         }
@@ -68,7 +68,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
     async def action_authorize(self, options: dict) -> bool:
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
-        id_tag = options.pop("idTag", "-")
+        id_tag = options.get("idTag", "-")
         json_payload = {
             "idToken": {
                 "idToken": id_tag,
@@ -88,9 +88,9 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.fill_missing_options_charge_start(options)
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
-        id_tag = options.pop("idTag", "-")
-        evse_id = options.pop("evseId", 1)
-        conenctor_id = options.pop("connectorId", 1)
+        id_tag = options.get("idTag", "-")
+        evse_id = options.get("evseId", 1)
+        conenctor_id = options.get("connectorId", 1)
         transaction_id = str(uuid.uuid4())
         action = "TransactionEvent"
         json_payload = {
@@ -138,8 +138,8 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
     async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: datetime = None) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
-        evse_id = options.pop("evseId", 1)
-        conenctor_id = options.pop("connectorId", 1)
+        evse_id = options.get("evseId", 1)
+        conenctor_id = options.get("connectorId", 1)
         self.charge_seq_no += 1
         action = "TransactionEvent"
         json_payload = {
@@ -182,9 +182,9 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.fill_missing_options_charge_stop(options)
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
-        id_tag = options.pop("idTag", "-")
-        evse_id = options.pop("evseId", 1)
-        conenctor_id = options.pop("connectorId", 1)
+        id_tag = options.get("idTag", "-")
+        evse_id = options.get("evseId", 1)
+        conenctor_id = options.get("connectorId", 1)
         self.charge_seq_no += 1
         action = "TransactionEvent"
         key_name = "idTokenInfo"

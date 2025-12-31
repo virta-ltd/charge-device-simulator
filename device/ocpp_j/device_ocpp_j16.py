@@ -53,7 +53,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
-            "connectorId": options.pop("connectorId", 1),
+            "connectorId": options.get("connectorId", 1),
             "errorCode": errorCode,
             "status": status
         }
@@ -65,7 +65,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
     async def action_authorize(self, options: dict) -> bool:
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
-        id_tag = options.pop("idTag", "-")
+        id_tag = options.get("idTag", "-")
         key_name = "idTagInfo"
         json_payload = {
             "idTag": id_tag
@@ -83,8 +83,8 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
         key_name = "idTagInfo"
-        id_tag = options.pop("idTag", "-")
-        conenctor_id = options.pop("connectorId", 1)
+        id_tag = options.get("idTag", "-")
+        conenctor_id = options.get("connectorId", 1)
         json_payload = {
             "timestamp": options["chargeStartTime"],
             "connectorId": conenctor_id,
@@ -103,7 +103,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
     async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: str = None) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
-        conenctor_id = options.pop("connectorId", 1)
+        conenctor_id = options.get("connectorId", 1)
         json_payload = {
             "connectorId": conenctor_id,
             "transactionId": self.charge_id,
@@ -129,13 +129,13 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
         key_name = "idTagInfo"
-        id_tag = options.pop("idTag", "-")
+        id_tag = options.get("idTag", "-")
         json_payload = {
             "timestamp": options["chargeStopTime"],
             "transactionId": self.charge_id,
             "meterStop": options["meterStop"],
             "idTag": id_tag,
-            "reason": options.pop("stopReason", "Local")
+            "reason": options.get("stopReason", "Local")
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':

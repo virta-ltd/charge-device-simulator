@@ -140,7 +140,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         self.fill_missing_options_charge_start(options)
         return math.floor(options["meterStart"] + (
             (self.utcnow() - datetime.datetime.fromisoformat(options["chargeStartTime"])).total_seconds() / 60
-            * options.pop("chargedKwhPerMinute", 1)
+            * options.get("chargedKwhPerMinute", 1)
             * 1000
         ))
 

@@ -107,8 +107,7 @@ class TestChargeMeterValueCurrent:
         assert first_result == 1000
 
         # Second call - 5 minutes later, same options dict (chargeStartTime preserved)
-        # Re-add chargedKwhPerMinute since it gets popped
-        options["chargedKwhPerMinute"] = 1
+        # chargedKwhPerMinute should still be in options (not popped)
         with patch.object(AbstractDeviceOcppJ, 'utcnow', return_value=time_after_5_minutes):
             second_result = ocpp_j_device.charge_meter_value_current(options)
 
@@ -183,24 +182,21 @@ class TestOptionsPersistence:
         stored_start_time = options["chargeStartTime"]
         assert result1 == 1000
 
-        # Second call at 1 minute
-        options["chargedKwhPerMinute"] = 1
+        # Second call at 1 minute - chargedKwhPerMinute should still be in options
         with patch.object(AbstractDeviceOcppJ, 'utcnow', return_value=time_1min):
             result2 = ocpp_j_device.charge_meter_value_current(options)
 
         assert options["chargeStartTime"] == stored_start_time
         assert result2 == 2000
 
-        # Third call at 2 minutes
-        options["chargedKwhPerMinute"] = 1
+        # Third call at 2 minutes - chargedKwhPerMinute should still be in options
         with patch.object(AbstractDeviceOcppJ, 'utcnow', return_value=time_2min):
             result3 = ocpp_j_device.charge_meter_value_current(options)
 
         assert options["chargeStartTime"] == stored_start_time
         assert result3 == 3000
 
-        # Fourth call at 3 minutes
-        options["chargedKwhPerMinute"] = 1
+        # Fourth call at 3 minutes - chargedKwhPerMinute should still be in options
         with patch.object(AbstractDeviceOcppJ, 'utcnow', return_value=time_3min):
             result4 = ocpp_j_device.charge_meter_value_current(options)
 

@@ -140,7 +140,7 @@ class DeviceOcppS(DeviceAbstract):
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         req_payload = {
-            "connectorId": options.pop("connectorId", 1),
+            "connectorId": options.get("connectorId", 1),
             "errorCode": errorCode,
             "status": status
         }
@@ -155,7 +155,7 @@ class DeviceOcppS(DeviceAbstract):
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
         req_payload = {
-            "idTag": options.pop("idTag", "-")
+            "idTag": options.get("idTag", "-")
         }
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['status'] != 'Accepted':
@@ -181,12 +181,12 @@ class DeviceOcppS(DeviceAbstract):
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
         self.charge_start_time = datetime.datetime.utcnow()
-        self.charge_meter_start = options.pop("meterStart", self.charge_meter_start)
+        self.charge_meter_start = options.get("meterStart", self.charge_meter_start)
         req_payload = {
             "timestamp": self.utcnow_iso(),
-            "connectorId": options.pop("connectorId", 1),
+            "connectorId": options.get("connectorId", 1),
             "meterStart": self.charge_meter_start,
-            "idTag": options.pop("idTag", "-")
+            "idTag": options.get("idTag", "-")
         }
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['idTagInfo']['status'] != 'Accepted':
@@ -200,7 +200,7 @@ class DeviceOcppS(DeviceAbstract):
     def charge_meter_value_current(self, options: dict):
         return math.floor(self.charge_meter_start + (
             (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
-            * options.pop("chargedKwhPerMinute", 1)
+            * options.get("chargedKwhPerMinute", 1)
             * 1000
         ))
 
@@ -208,7 +208,7 @@ class DeviceOcppS(DeviceAbstract):
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
         req_payload = {
-            "connectorId": options.pop("connectorId", 1),
+            "connectorId": options.get("connectorId", 1),
             "transactionId": self.charge_id,
             "values": [{
                 "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
@@ -236,7 +236,7 @@ class DeviceOcppS(DeviceAbstract):
             "timestamp": self.utcnow_iso(),
             "transactionId": self.charge_id,
             "meterStop": self.charge_meter_value_current(options),
-            "idTag": options.pop("idTag", "-"),
+            "idTag": options.get("idTag", "-"),
         }
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['status'] != 'Accepted':
