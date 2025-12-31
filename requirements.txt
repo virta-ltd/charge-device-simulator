@@ -4,3 +4,4 @@ aioconsole
 pyyaml
 zeep[async]
 certifi
+pytest

@@ -18,7 +18,7 @@ class DeviceAbstract(abc.ABC):
         self.charge_in_progress = False
         self.charge_id = -1
         envKey = 'RESPONSE_TIMEOUT_SECONDS'
-        self.response_timeout_seconds = int(os.environ[envKey]) if envKey in os.environ else 10
+        self.response_timeout_seconds = int(os.environ[envKey]) if envKey in os.environ else 15
 
     @property
     @abc.abstractmethod
@@ -63,27 +63,27 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, options: dict) -> bool:
         pass
 
     @abc.abstractmethod
-    async def action_status_update(self, status, **options) -> bool:
+    async def action_status_update(self, status, options: dict) -> bool:
         pass
 
     @abc.abstractmethod
-    async def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, options: dict) -> bool:
         pass
 
     @abc.abstractmethod
-    async def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: str = None) -> bool:
         pass
 
     @abc.abstractmethod
-    async def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, options: dict) -> bool:
         pass
 
     @abc.abstractmethod
-    async def action_data_transfer(self, **options) -> bool:
+    async def action_data_transfer(self, options: dict) -> bool:
         pass
 
     @abc.abstractmethod
@@ -91,18 +91,18 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def flow_authorize(self, **options) -> bool:
+    async def flow_authorize(self, options: dict) -> bool:
         pass
 
     @abc.abstractmethod
-    async def flow_charge(self, auto_stop: bool, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         pass
 
     @abc.abstractmethod
-    async def flow_charge_ongoing_actions(self, **options) -> bool:
+    async def flow_charge_ongoing_actions(self, options: dict) -> bool:
         pass
 
-    async def flow_charge_ongoing_loop(self, auto_stop: bool, **options):
+    async def flow_charge_ongoing_loop(self, auto_stop: bool, options: dict):
         if "meterValues" in options:
             meter_values = options["meterValues"]
             if (not isinstance(meter_values, list)
@@ -114,7 +114,7 @@ class DeviceAbstract(abc.ABC):
                 raise ValueError("meterValues must be a list of dictionaries with 'meterValue', 'timestamp' and 'secondsToSleep' keys.")
             for i in meter_values:
                 await asyncio.sleep(i["secondsToSleep"])
-                if not await self.action_meter_value(meter_value=i["meterValue"], time_stamp=i["timestamp"], **options):
+                if not await self.action_meter_value(options, meter_value=i["meterValue"], time_stamp=i["timestamp"]):
                     return False
             return True
         else:
@@ -124,7 +124,7 @@ class DeviceAbstract(abc.ABC):
             while self.charge_in_progress:
                 await asyncio.sleep(charge_loop_wait_seconds)
                 charge_loop_counter += 1
-                if not await self.flow_charge_ongoing_actions(**options):
+                if not await self.flow_charge_ongoing_actions(options):
                     return False
                 if auto_stop and charge_loop_counter >= charge_loop_max:
                     break
@@ -150,5 +150,5 @@ class DeviceAbstract(abc.ABC):
         return self.charge_in_progress and self.charge_id == req_id
 
     @abc.abstractmethod
-    def charge_meter_value_current(self, **options):
+    def charge_meter_value_current(self, options: dict):
         pass

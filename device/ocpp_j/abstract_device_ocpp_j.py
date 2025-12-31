@@ -114,7 +114,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_data_transfer(self, **options) -> bool:
+    async def action_data_transfer(self, options: dict) -> bool:
         action = "DataTransfer"
         self.logger.info(f"Action {action} Start")
         json_payload = options
@@ -134,9 +134,9 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if "chargeStopTime" not in options:
             options["chargeStopTime"] = self.utcnow_iso()
         if "meterStop" not in options:
-            options["meterStop"] = self.charge_meter_value_current(**options)
+            options["meterStop"] = self.charge_meter_value_current(options)
 
-    def charge_meter_value_current(self, **options):
+    def charge_meter_value_current(self, options: dict):
         self.fill_missing_options_charge_start(options)
         return math.floor(options["meterStart"] + (
             (self.utcnow() - datetime.datetime.fromisoformat(options["chargeStartTime"])).total_seconds() / 60
@@ -152,49 +152,49 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    async def flow_authorize(self, **options) -> bool:
+    async def flow_authorize(self, options: dict) -> bool:
         log_title = self.flow_authorize.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not await self.action_authorize(**options):
+        if not await self.action_authorize(options):
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    async def flow_charge(self, auto_stop: bool, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not await self.action_authorize(**options):
+        if not await self.action_authorize(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_charge_start(**options):
+        if not await self.action_charge_start(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Preparing", **options):
+        if not await self.action_status_update("Preparing", options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Charging", **options):
+        if not await self.action_status_update("Charging", options):
             self.charge_in_progress = False
             return False
-        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+        if not await self.flow_charge_ongoing_loop(auto_stop, options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Finishing", **options):
+        if not await self.action_status_update("Finishing", options):
             self.charge_in_progress = False
             return False
-        if not await self.action_charge_stop(**options):
+        if not await self.action_charge_stop(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Available", **options):
+        if not await self.action_status_update("Available", options):
             self.charge_in_progress = False
             return False
         self.logger.info(f"Flow {log_title} End")
         self.charge_in_progress = False
         return True
 
-    async def flow_charge_ongoing_actions(self, **options) -> bool:
+    async def flow_charge_ongoing_actions(self, options: dict) -> bool:
         if options.get("autoActionsLoopDisableMeterValues", False):
             return True
-        return await self.action_meter_value(**options)
+        return await self.action_meter_value(options)
 
     async def by_device_req_send(self, action, json_payload) -> typing.Any:
         req_id = str(uuid.uuid4())
@@ -301,7 +301,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 resp_payload = {
                     "status": "Accepted"
                 }
-                next_async_task = self.action_meter_value(**options)
+                next_async_task = self.action_meter_value(options)
             if req_payload["requestedMessage"] == "BootNotification":
                 resp_payload = {
                     "status": "Accepted"
@@ -320,9 +320,9 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                     "status": "Accepted"
                 }
                 if self.charge_in_progress:
-                    next_async_task = await self.action_status_update("Charging", **options)
+                    next_async_task = await self.action_status_update("Charging", options)
                 else:
-                    next_async_task = await self.action_status_update("Available", **options)
+                    next_async_task = await self.action_status_update("Available", options)
         if req_action == "RemoteStartTransaction".lower():
             if not self.charge_can_start():
                 resp_payload["status"] = "Rejected"
@@ -332,7 +332,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                     "idTag": req_payload["idTag"] if "idTag" in req_payload else "-",
                 }
                 self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
-                next_async_task = utility.run_with_delay(self.flow_charge(False, **options), 2)
+                next_async_task = utility.run_with_delay(self.flow_charge(False, options), 2)
 
         if req_action == "RemoteStopTransaction".lower():
             if not self.charge_can_stop(req_payload["transactionId"] if "transactionId" in req_payload else 0):

@@ -48,10 +48,10 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_status_update(self, status, **options) -> bool:
-        return await self.action_status_update_ocpp(status, **options)
-        
-    async def action_status_update_ocpp(self, status, **options) -> bool:
+    async def action_status_update(self, status, options: dict) -> bool:
+        return await self.action_status_update_ocpp(status, options)
+
+    async def action_status_update_ocpp(self, status, options: dict) -> bool:
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -65,7 +65,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, options: dict) -> bool:
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
         id_tag = options.pop("idTag", "-")
@@ -84,7 +84,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, options: dict) -> bool:
         self.fill_missing_options_charge_start(options)
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
@@ -135,7 +135,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_meter_value(self, meter_value: int = None, time_stamp: datetime = None, **options) -> bool:
+    async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: datetime = None) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
         evse_id = options.pop("evseId", 1)
@@ -155,7 +155,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 {
                     "sampledValue": [
                         {
-                            "value": meter_value if meter_value else self.charge_meter_value_current(**options),
+                            "value": meter_value if meter_value else self.charge_meter_value_current(options),
                             "context":"Sample.Periodic",
                             "measurand": "Energy.Active.Import.Register",
                             "location": "Outlet",
@@ -178,7 +178,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, options: dict) -> bool:
         self.fill_missing_options_charge_stop(options)
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
@@ -229,31 +229,31 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def flow_charge(self, auto_stop: bool, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not await self.action_authorize(**options):
+        if not await self.action_authorize(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Occupied", **options):
+        if not await self.action_status_update("Occupied", options):
             self.charge_in_progress = False
             return False
-        if not await self.action_charge_start(**options):
+        if not await self.action_charge_start(options):
             self.charge_in_progress = False
             return False
-        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+        if not await self.flow_charge_ongoing_loop(auto_stop, options):
             self.charge_in_progress = False
             return False
-        if not await self.action_charge_stop(**options):
+        if not await self.action_charge_stop(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Available", **options):
+        if not await self.action_status_update("Available", options):
             self.charge_in_progress = False
             return False
         self.logger.info(f"Flow {log_title} End")
         self.charge_in_progress = False
         return True
-    
+
     async def loop_interactive_custom(self):
         is_back = False
         while not is_back:
@@ -272,7 +272,7 @@ What should I do? (enter the number + enter)
                 input1 = await aioconsole.ainput("Which status?\n")
                 input2 = await aioconsole.ainput("Which evseId?\n")
                 input3 = await aioconsole.ainput("Which connector?\n")
-                await self.action_status_update_ocpp(input1, ** {
+                await self.action_status_update_ocpp(input1, {
                     'evseId': int(input2),
                     'connectorId': int(input3),
                 })

@@ -3,7 +3,6 @@ import datetime
 import json
 import logging
 import math
-import sys
 import typing
 from urllib import parse
 
@@ -99,7 +98,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_status_update(self, status, **options) -> bool:
+    async def action_status_update(self, status, options: dict) -> bool:
         action = "status_update"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -114,13 +113,13 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, options: dict) -> bool:
         action = "authorize"
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 10,
         }
-        self.prepare_authorize_params(json_payload, **options)
+        self.prepare_authorize_params(json_payload, options)
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'success' not in resp_json:
             await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}", ErrorReasons.InvalidResponse)
@@ -128,7 +127,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    def prepare_authorize_params(self, json_payload, **options):
+    def prepare_authorize_params(self, json_payload, options: dict):
         options_rfid = options.pop("rfid", None)
         if options_rfid is not None:
             json_payload["rfid"] = options_rfid
@@ -141,7 +140,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
     charge_start_time = datetime.datetime.utcnow()
     charge_meter_start = 1000
 
-    async def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, options: dict) -> bool:
         action = "charge_start"
         self.logger.info(f"Action {action} Start")
         self.charge_start_time = datetime.datetime.utcnow()
@@ -151,7 +150,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             "chg": 2,
             "out": options.pop("connectorId", 1),
         }
-        self.prepare_authorize_params(json_payload, **options)
+        self.prepare_authorize_params(json_payload, options)
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
             await self.handle_error(f"Action {action} Response Failed:\n{json.dumps(resp_json)}", ErrorReasons.InvalidResponse)
@@ -160,22 +159,22 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    def charge_meter_value_current(self, **options):
+    def charge_meter_value_current(self, options: dict):
         return math.floor(self.charge_meter_start + (
             (datetime.datetime.utcnow() - self.charge_start_time).total_seconds() / 60
             * options.pop("chargedKwhPerMinute", 1)
             * 1000
         ))
 
-    async def action_meter_value(self, **options) -> bool:
+    async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: str = None) -> bool:
         action = "meter_value"
         self.logger.info(f"Action {action} Start")
         json_payload = {
             'id': 43,
             "out": options.pop("connectorId", 1),
-            "time": datetime.datetime.utcnow().timestamp(),
+            "time": datetime.datetime.utcnow().timestamp() if time_stamp is None else time_stamp,
             "t": 382,
-            "eem": self.charge_meter_value_current(**options) - self.charge_meter_start,
+            "eem": (meter_value if meter_value else self.charge_meter_value_current(options)) - self.charge_meter_start,
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
@@ -184,7 +183,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, options: dict) -> bool:
         action = "charge_stop"
         self.logger.info(f"Action {action} Start")
         json_payload = {
@@ -192,7 +191,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
             "idtag": options.pop("idTag", "-"),
             "chg": 0,
             "out": options.pop("connectorId", 1),
-            "kwh": (self.charge_meter_value_current(**options) - self.charge_meter_start) / 1000,
+            "kwh": (self.charge_meter_value_current(options) - self.charge_meter_start) / 1000,
             "timestamp": self.utcnow_iso(),
         }
         resp_json = await self.by_device_req_send(action, json_payload)
@@ -202,7 +201,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_data_transfer(self, **options) -> bool:
+    async def action_data_transfer(self, options: dict) -> bool:
         return True
 
     async def flow_heartbeat(self) -> bool:
@@ -213,48 +212,48 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    async def flow_authorize(self, **options) -> bool:
+    async def flow_authorize(self, options: dict) -> bool:
         log_title = self.flow_authorize.__name__
         self.logger.info(f"Flow {log_title} Start")
-        if not await self.action_authorize(**options):
+        if not await self.action_authorize(options):
             return False
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    async def flow_charge(self, auto_stop: bool, **options) -> bool:
+    async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
         if not options.pop("is_remote_started", False):
-            if not await self.action_authorize(**options):
+            if not await self.action_authorize(options):
                 self.charge_in_progress = False
                 return False
-        if not await self.action_status_update("1", **options):
+        if not await self.action_status_update("1", options):
             self.charge_in_progress = False
             return False
-        if not await self.action_charge_start(**options):
+        if not await self.action_charge_start(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("1", **options):
+        if not await self.action_status_update("1", options):
             self.charge_in_progress = False
             return False
-        if not await self.flow_charge_ongoing_loop(auto_stop, **options):
+        if not await self.flow_charge_ongoing_loop(auto_stop, options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("0", **options):
+        if not await self.action_status_update("0", options):
             self.charge_in_progress = False
             return False
-        if not await self.action_charge_stop(**options):
+        if not await self.action_charge_stop(options):
             self.charge_in_progress = False
             return False
         self.logger.info(f"Flow {log_title} End")
         self.charge_in_progress = False
         return True
 
-    async def flow_charge_ongoing_actions(self, **options) -> bool:
+    async def flow_charge_ongoing_actions(self, options: dict) -> bool:
         if not options.get("autoActionsLoopDisableMeterValues", False):
-            if not await self.action_meter_value(**options):
+            if not await self.action_meter_value(options):
                 self.logger.warning(f"Flow charge, meter values not success")
-        return await self.action_status_update("1", **options)
+        return await self.action_status_update("1", options)
 
     async def by_device_req_send(self, action, json_payload, valid_ids: typing.Sequence = None):
         result = asyncio.get_running_loop().create_future()
@@ -353,7 +352,7 @@ class DeviceEnsto(device.abstract.DeviceAbstract):
                         "is_remote_started": True,
                     }
                     self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
-                    asyncio.create_task(utility.run_with_delay(self.flow_charge(False, **options), 2))
+                    asyncio.create_task(utility.run_with_delay(self.flow_charge(False, options), 2))
             elif req_scmd == "0":
                 if not self.charge_can_stop(-1):
                     del resp_payload["ack"]
@@ -420,7 +419,7 @@ What should I do? (enter the number + enter)
                 await self.action_heart_beat()
             elif input1 == "2":
                 input1 = await aioconsole.ainput("Which status?\n")
-                await self.action_status_update(input1)
+                await self.action_status_update(input1, {})
             elif input1 == "99":
                 input1 = await aioconsole.ainput("Enter full raw request:\n")
                 req_json = self.__raw_to_json(input1)
