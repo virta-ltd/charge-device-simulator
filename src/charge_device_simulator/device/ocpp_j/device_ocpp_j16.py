@@ -1,13 +1,9 @@
-import datetime
-import logging
 import sys
 
-import readline
-
 import aioconsole
-from device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
 
-from device.error_reasons import ErrorReasons
+from ..error_reasons import ErrorReasons
+from .abstract_device_ocpp_j import AbstractDeviceOcppJ
 
 if sys.platform != "win32":
     # Fake call to readline module to make sure it is loaded
@@ -50,14 +46,14 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_status_update(self, status, **options) -> bool:
-        return await self.action_status_update_ocpp(status, "NoError", **options)
+    async def action_status_update(self, status, options: dict) -> bool:
+        return await self.action_status_update_ocpp(status, "NoError", options)
 
-    async def action_status_update_ocpp(self, status, errorCode, **options) -> bool:
+    async def action_status_update_ocpp(self, status, errorCode, options: dict) -> bool:
         action = "StatusNotification"
         self.logger.info(f"Action {action} Start")
         json_payload = {
-            "connectorId": options.pop("connectorId", 1),
+            "connectorId": options.get("connectorId", 1),
             "errorCode": errorCode,
             "status": status
         }
@@ -66,10 +62,10 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_authorize(self, **options) -> bool:
+    async def action_authorize(self, options: dict) -> bool:
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
-        id_tag = options.pop("idTag", "-")
+        id_tag = options.get("idTag", "-")
         key_name = "idTagInfo"
         json_payload = {
             "idTag": id_tag
@@ -82,13 +78,13 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_charge_start(self, **options) -> bool:
+    async def action_charge_start(self, options: dict) -> bool:
         self.fill_missing_options_charge_start(options)
         action = "StartTransaction"
         self.logger.info(f"Action {action} Start")
         key_name = "idTagInfo"
-        id_tag = options.pop("idTag", "-")
-        conenctor_id = options.pop("connectorId", 1)
+        id_tag = options.get("idTag", "-")
+        conenctor_id = options.get("connectorId", 1)
         json_payload = {
             "timestamp": options["chargeStartTime"],
             "connectorId": conenctor_id,
@@ -104,17 +100,17 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_meter_value(self, meter_value: int = None, time_stamp: datetime = None, **options) -> bool:
+    async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: str = None) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
-        conenctor_id = options.pop("connectorId", 1)
+        conenctor_id = options.get("connectorId", 1)
         json_payload = {
             "connectorId": conenctor_id,
             "transactionId": self.charge_id,
             "meterValue": [{
                 "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
                 "sampledValue": [{
-                    "value": meter_value if meter_value else self.charge_meter_value_current(**options),
+                    "value": meter_value if meter_value else self.charge_meter_value_current(options),
                     "context": "Sample.Periodic",
                     "measurand": "Energy.Active.Import.Register",
                     "location": "Outlet",
@@ -128,19 +124,19 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         self.logger.info(f"Action {action} End")
         return True
 
-    async def action_charge_stop(self, **options) -> bool:
+    async def action_charge_stop(self, options: dict) -> bool:
         self.fill_missing_options_charge_stop(options)
         action = "StopTransaction"
         self.logger.info(f"Action {action} Start")
         key_name = "idTagInfo"
-        id_tag = options.pop("idTag", "-")
+        id_tag = options.get("idTag", "-")
         json_payload = {
             "timestamp": options["chargeStopTime"],
             "transactionId": self.charge_id,
             "meterStop": options["meterStop"],
             "idTag": id_tag,
-            "reason": options.pop("stopReason", "Local")
-        }        
+            "reason": options.get("stopReason", "Local")
+        }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
@@ -166,7 +162,7 @@ What should I do? (enter the number + enter)
                 input1 = await aioconsole.ainput("Which status?\n")
                 input2 = await aioconsole.ainput("Which errorCode?\n")
                 input3 = await aioconsole.ainput("Which connector?\n")
-                await self.action_status_update_ocpp(input1, input2, ** {
+                await self.action_status_update_ocpp(input1, input2, {
                     'connectorId': input3,
                 })
             elif input1 == "99":

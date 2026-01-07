@@ -4,11 +4,11 @@ import typing
 
 import aioconsole
 
+from .error_reasons import ErrorReasons
+from ..model.error_message import ErrorMessage
 from .abstract import DeviceAbstract
 from .flows import Flows
 from .frequent_flow_options import FrequentFlowOptions
-from device.error_reasons import ErrorReasons
-from model.error_message import ErrorMessage
 
 
 class Simulator:
@@ -19,7 +19,7 @@ class Simulator:
         return self.__logger
 
     is_ended = False
-    flow_charge_options: None
+    flow_charge_options: dict = {}
     frequent_flow_enabled = True
     is_interactive = False
     frequent_flows: typing.Dict[Flows, FrequentFlowOptions] = {}
@@ -56,11 +56,11 @@ class Simulator:
                         task_def = self.device.flow_heartbeat()
                     elif f_flow == Flows.Authorize:
                         task_def = self.device.flow_authorize(
-                            **self.flow_charge_options)
+                            self.flow_charge_options)
                     elif f_flow == Flows.Charge:
                         task_def = self.device.flow_charge(
                             True,
-                            **self.flow_charge_options
+                            self.flow_charge_options
                         )
                     if task_def is not None:
                         self.logger.info(
@@ -133,11 +133,11 @@ What should I do? (enter the number + enter)
             if input1 == "0":
                 return
             elif input1 == "1":
-                await self.device.flow_charge(True, **self.flow_charge_options)
+                await self.device.flow_charge(True, self.flow_charge_options)
             elif input1 == "2":
                 await self.device.flow_heartbeat()
             elif input1 == "3":
-                await self.device.flow_authorize(**self.flow_charge_options)
+                await self.device.flow_authorize(self.flow_charge_options)
             elif input1 == "99":
                 await self.device.loop_interactive_custom()
         pass

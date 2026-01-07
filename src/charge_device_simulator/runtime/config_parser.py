@@ -1,6 +1,6 @@
 from typing import Optional
 
-import device
+from .. import device
 
 
 class ConfigParser:
