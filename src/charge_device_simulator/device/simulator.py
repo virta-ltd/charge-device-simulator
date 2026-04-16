@@ -18,15 +18,15 @@ class Simulator:
         return self.__logger
 
     is_ended = False
-    flow_charge_options: dict = {}
     frequent_flow_enabled = True
     is_interactive = False
-    frequent_flows: typing.Dict[Flows, FrequentFlowOptions] = {}
-    on_error = []
 
     def __init__(self, device: DeviceAbstract):
         self.device = device
         self.name = ''
+        self.flow_charge_options = {}
+        self.frequent_flows = {}
+        self.on_error = []
 
     async def loop_flow_frequent(self):
         time_loop = 0
