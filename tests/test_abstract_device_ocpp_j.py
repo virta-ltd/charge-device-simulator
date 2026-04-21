@@ -120,6 +120,98 @@ class TestChargeMeterValueCurrent:
         assert second_result > first_result
 
 
+class TestFlowAutoPreparing:
+    """Tests for the flow_preparing method."""
+
+    @pytest.mark.asyncio
+    async def test_skips_status_update_when_charge_in_progress(self, ocpp_j_device):
+        """preparing should be a no-op when a charge is in progress."""
+        ocpp_j_device.charge_in_progress = True
+        ocpp_j_device.is_preparing = False
+
+        result = await ocpp_j_device.flow_preparing()
+
+        assert result is True
+        assert ocpp_j_device.is_preparing is False
+
+    @pytest.mark.asyncio
+    async def test_sends_preparing_when_idle(self, ocpp_j_device):
+        """preparing should send Preparing status when charger is idle."""
+        ocpp_j_device.charge_in_progress = False
+        ocpp_j_device.is_preparing = False
+
+        result = await ocpp_j_device.flow_preparing()
+
+        assert result is True
+        assert ocpp_j_device.is_preparing is True
+
+    @pytest.mark.asyncio
+    async def test_status_update_failure_resets_is_preparing(self, ocpp_j_device):
+        """If status_update fails, is_preparing should be reset to False."""
+        ocpp_j_device.charge_in_progress = False
+
+        async def fail_status(status, options):
+            return False
+        ocpp_j_device.action_status_update = fail_status
+
+        result = await ocpp_j_device.flow_preparing()
+
+        assert result is False
+        assert ocpp_j_device.is_preparing is False
+
+    @pytest.mark.asyncio
+    async def test_flow_charge_ends_with_preparing_when_is_preparing(self, ocpp_j_device):
+        """flow_charge should end with Preparing (not Available) when is_preparing is True."""
+        ocpp_j_device.is_preparing = True
+
+        status_calls = []
+        async def track_status(status, options):
+            status_calls.append(status)
+            return True
+        ocpp_j_device.action_status_update = track_status
+
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            result = await ocpp_j_device.flow_charge(True, {})
+
+        assert result is True
+        assert status_calls[-1] == "Preparing"
+        assert ocpp_j_device.is_preparing is True
+
+    @pytest.mark.asyncio
+    async def test_is_preparing_survives_charge_failure(self, ocpp_j_device):
+        """is_preparing should remain True if flow_charge fails mid-way."""
+        ocpp_j_device.is_preparing = True
+
+        async def fail_authorize(options):
+            return False
+        ocpp_j_device.action_authorize = fail_authorize
+
+        result = await ocpp_j_device.flow_charge(True, {})
+
+        assert result is False
+        assert ocpp_j_device.is_preparing is True
+
+    @pytest.mark.asyncio
+    async def test_trigger_message_reports_preparing(self, ocpp_j_device):
+        """TriggerMessage StatusNotification should report Preparing when is_preparing is True."""
+        ocpp_j_device.charge_in_progress = False
+        ocpp_j_device.is_preparing = True
+        ocpp_j_device._ws = MagicMock()
+        ocpp_j_device._ws.send = AsyncMock()
+
+        status_calls = []
+        async def track_status(status, options):
+            status_calls.append(status)
+        ocpp_j_device.action_status_update = track_status
+
+        await ocpp_j_device.by_middleware_req(
+            "req-1", "triggermessage",
+            {"requestedMessage": "StatusNotification"}
+        )
+
+        assert status_calls == ["Preparing"]
+
+
 class TestOptionsPersistence:
     """Tests to verify that options dict modifications persist to caller."""
 

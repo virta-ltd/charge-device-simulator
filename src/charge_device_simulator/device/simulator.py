@@ -61,6 +61,8 @@ class Simulator:
                             True,
                             self.flow_charge_options
                         )
+                    elif f_flow == Flows.Preparing:
+                        task_def = self.device.flow_preparing()
                     if task_def is not None:
                         self.logger.info(
                             f"Frequent Flow, Started, Flow: {f_flow}, Time: {time_loop}")

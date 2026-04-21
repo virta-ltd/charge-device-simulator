@@ -20,6 +20,9 @@ simulations:
       - flow: charge # A full session of charging (status, start/stop, meter values, ...)
         delay_seconds: 180 # delay between each run in seconds
         count: 5 # How many times this flow should be run, if -1 it would run forever
+      - flow: preparing # Keeps the charger in PREPARING state (simulates cable always plugged in). Skips if a charge is in progress. When used, the charge flow will end with Preparing instead of Available.
+        delay_seconds: 60 # delay between each run in seconds
+        count: -1 # How many times this flow should be run, if -1 it would run forever
 
 # All your devices identified by their name
 devices:
