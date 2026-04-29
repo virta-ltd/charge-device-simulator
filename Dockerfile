@@ -6,4 +6,5 @@ RUN apk add --update --no-cache --virtual .build-deps g++ gcc libxml2-dev libxsl
 WORKDIR app
 COPY . .
 RUN pip install -r requirements.txt
+RUN pip install .
 ENTRYPOINT ["python","./docker_entry.py"]

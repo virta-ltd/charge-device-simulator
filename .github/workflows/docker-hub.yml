@@ -1,15 +1,44 @@
 name: Docker Hub Image Release
 
-on: 
+on:
   pull_request:
     branches: [master]
+  push:
+    branches: [master]
   release:
-    types: [created, edited]
+    types: [published]
 
 jobs:
-  push_to_registry:
-    name: Push Docker image to Docker Hub
-    runs-on: ubuntu-latest
+  test:
+    name: Build Image and Verify (PR)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build Docker image
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: charge-device-simulator:ci-test
+
+      - name: Smoke test image
+        run: |
+          docker run --rm \
+            --entrypoint python \
+            charge-device-simulator:ci-test \
+            -c "from charge_device_simulator.runtime import ExecutorCli; print('OK')"
+
+  publish:
+    name: Build and push Docker image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: github.event_name != 'pull_request'
     permissions:
       packages: write
       contents: read
@@ -17,7 +46,7 @@ jobs:
       id-token: write
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Log in to Docker Hub
         uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
@@ -42,7 +71,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@db473fddc028af60658334401dc6fa3ffd8669fd # v2.3.0
         with:
           subject-name: index.docker.io/virtaltd/charge-device-simulator
           subject-digest: ${{ steps.push.outputs.digest }}
