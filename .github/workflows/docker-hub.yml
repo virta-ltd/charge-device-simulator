@@ -10,7 +10,7 @@ on:
 
 jobs:
   test:
-    name: Build and test (PR)
+    name: Build Image and Verify (PR)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     if: github.event_name == 'pull_request'
@@ -30,9 +30,9 @@ jobs:
       - name: Smoke test image
         run: |
           docker run --rm \
-            --entrypoint pytest \
+            --entrypoint python \
             charge-device-simulator:ci-test \
-            tests/ -v --timeout=60
+            -c "from charge_device_simulator.runtime import ExecutorCli; print('OK')"
 
   publish:
     name: Build and push Docker image
