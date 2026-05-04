@@ -6,8 +6,6 @@ import math
 import typing
 from urllib import parse
 
-import aioconsole
-
 from .. import abstract as device_abstract
 from .. import utility
 from .pending_req import PendingReq
@@ -415,24 +413,18 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
         pass
 
     async def loop_interactive_custom(self):
-        is_back = False
-        while not is_back:
-            input1 = await aioconsole.ainput("""
-What should I do? (enter the number + enter)
-0: Back
-1: HeartBeat
-2: StatusUpdate
-99: Full Custom
-""")
-            if input1 == "0":
-                is_back = True
-            elif input1 == "1":
-                await self.action_heart_beat()
-            elif input1 == "2":
-                input1 = await aioconsole.ainput("Which status?\n")
-                await self.action_status_update(input1, {})
-            elif input1 == "99":
-                input1 = await aioconsole.ainput("Enter full raw request:\n")
-                req_json = self.__raw_to_json(input1)
-                await self.by_device_req_send(req_json['id'], req_json)
-        pass
+        await utility.run_menu("What should I do?", [
+            utility.MenuEntry("Back", is_back=True, shortcut="0"),
+            utility.MenuEntry("HeartBeat", self.action_heart_beat, shortcut="1"),
+            utility.MenuEntry("StatusUpdate", self._interactive_status_update, shortcut="2"),
+            utility.MenuEntry("Full Custom", self._interactive_full_custom, shortcut="s"),
+        ])
+
+    async def _interactive_status_update(self) -> None:
+        status: str = await utility.prompt_text("Which status?")
+        await self.action_status_update(status, {})
+
+    async def _interactive_full_custom(self) -> None:
+        raw: str = await utility.prompt_text("Enter full raw request:")
+        req_json = self.__raw_to_json(raw)
+        await self.by_device_req_send(req_json['id'], req_json)

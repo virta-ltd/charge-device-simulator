@@ -2,8 +2,7 @@ import asyncio
 import logging
 import typing
 
-import aioconsole
-
+from . import utility
 from .error_reasons import ErrorReasons
 from ..model.error_message import ErrorMessage
 from .abstract import DeviceAbstract
@@ -121,29 +120,24 @@ class Simulator:
         pass
 
     async def loop_interactive(self):
-        while not self.is_ended:
-            input1 = await aioconsole.ainput("""
-What should I do? (enter the number + enter)
-0: Exit
-1: Flow charge
-2: Flow heartbeat
-3: Flow authorize
-4: Flow charge with RFID swipe (enter idTag)
-99: Single message
-""")
-            if input1 == "0":
-                return
-            elif input1 == "1":
-                await self.device.flow_charge(True, self.flow_charge_options)
-            elif input1 == "2":
-                await self.device.flow_heartbeat()
-            elif input1 == "3":
-                await self.device.flow_authorize(self.flow_charge_options)
-            elif input1 == "4":
-                swiped_id_tag: str = await aioconsole.ainput("Swipe RFID — enter idTag:\n")
-                swipe_options: typing.Dict[str, typing.Any] = dict(self.flow_charge_options)
-                swipe_options["idTag"] = swiped_id_tag
-                await self.device.flow_charge(True, swipe_options)
-            elif input1 == "99":
-                await self.device.loop_interactive_custom()
-        pass
+        await utility.run_menu("What should I do?", [
+            utility.MenuEntry("Exit", is_back=True, shortcut="0"),
+            utility.MenuEntry("Flow charge", self._interactive_flow_charge, shortcut="1"),
+            utility.MenuEntry("Flow heartbeat", self.device.flow_heartbeat, shortcut="2"),
+            utility.MenuEntry("Flow authorize", self._interactive_flow_authorize, shortcut="3"),
+            utility.MenuEntry("Flow charge with RFID swipe",
+                              self._interactive_flow_rfid_swipe, shortcut="4"),
+            utility.MenuEntry("Single message", self.device.loop_interactive_custom, shortcut="s"),
+        ])
+
+    async def _interactive_flow_charge(self) -> None:
+        await self.device.flow_charge(True, self.flow_charge_options)
+
+    async def _interactive_flow_authorize(self) -> None:
+        await self.device.flow_authorize(self.flow_charge_options)
+
+    async def _interactive_flow_rfid_swipe(self) -> None:
+        swiped_id_tag: str = await utility.prompt_text("Swipe RFID — enter idTag:")
+        swipe_options: typing.Dict[str, typing.Any] = dict(self.flow_charge_options)
+        swipe_options["idTag"] = swiped_id_tag
+        await self.device.flow_charge(True, swipe_options)

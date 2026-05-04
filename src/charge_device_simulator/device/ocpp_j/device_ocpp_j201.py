@@ -3,9 +3,10 @@ import sys
 import typing
 import uuid
 
-import aioconsole
 from .abstract_device_ocpp_j import AbstractDeviceOcppJ
+from .. import utility
 from ..error_reasons import ErrorReasons
+from ..ocpp_enums import OCPP_201_CONNECTOR_STATUSES
 
 if sys.platform != "win32":
     # Fake call to readline module to make sure it is loaded
@@ -282,30 +283,29 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         }
 
     async def loop_interactive_custom(self):
-        is_back = False
-        while not is_back:
-            input1 = await aioconsole.ainput(f"""
-What should I do? (enter the number + enter)
-0: Back
-1: HeartBeat
-2: StatusUpdate
-{self.interactive_reservation_menu}99: Full custom
-""")
-            if input1 == "0":
-                is_back = True
-            elif input1 == "1":
-                await self.action_heart_beat()
-            elif input1 == "2":
-                input1 = await aioconsole.ainput("Which status?\n")
-                input2 = await aioconsole.ainput("Which evseId?\n")
-                input3 = await aioconsole.ainput("Which connector?\n")
-                await self.action_status_update_ocpp(input1, {
-                    'evseId': int(input2),
-                    'connectorId': int(input3),
-                })
-            elif await self.interactive_reservation_handle(input1):
-                pass
-            elif input1 == "99":
-                input1 = input("Enter full custom message:\n")
-                await self.by_device_req_send_raw(input1, "Custom")
-        pass
+        await utility.run_menu("What should I do?", [
+            utility.MenuEntry("Back", is_back=True, shortcut="0"),
+            utility.MenuEntry("HeartBeat", self.action_heart_beat, shortcut="1"),
+            utility.MenuEntry("StatusUpdate", self._interactive_status_update, shortcut="2"),
+            utility.MenuEntry("Show reservation state",
+                              self.interactive_reservation_show, shortcut="3"),
+            utility.MenuEntry("Make reservation (simulate ReserveNow)",
+                              self.interactive_reservation_make, shortcut="4"),
+            utility.MenuEntry("Cancel reservation (simulate CancelReservation)",
+                              self.interactive_reservation_cancel, shortcut="5"),
+            utility.MenuEntry("Full custom", self._interactive_full_custom, shortcut="s"),
+        ])
+
+    async def _interactive_status_update(self) -> None:
+        status: str = await utility.select_from_list(
+            "Which status?", OCPP_201_CONNECTOR_STATUSES)
+        evse_id: str = await utility.prompt_text("Which evseId?")
+        connector: str = await utility.prompt_text("Which connector?")
+        await self.action_status_update_ocpp(status, {
+            'evseId': int(evse_id),
+            'connectorId': int(connector),
+        })
+
+    async def _interactive_full_custom(self) -> None:
+        message: str = await utility.prompt_text("Enter full custom message:")
+        await self.by_device_req_send_raw(message, "Custom")

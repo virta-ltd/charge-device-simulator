@@ -6,8 +6,7 @@ import os
 import sys
 import typing
 
-import aioconsole
-
+from . import utility
 from .error_reasons import ErrorReasons
 
 
@@ -256,47 +255,41 @@ class DeviceAbstract(abc.ABC):
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    interactive_reservation_menu: str = """3: Show reservation state
-4: Make reservation (simulate ReserveNow)
-5: Cancel reservation (simulate CancelReservation)
-"""
+    async def interactive_reservation_show(self) -> None:
+        """Print the device's current reservation state."""
+        self.logger.info(
+            f"Reservation state: id={self.reservation_id}, "
+            f"connectorId={self.reservation_connector_id}, "
+            f"idTag={self.reservation_id_tag}, "
+            f"parentIdTag={self.reservation_parent_id_tag}, "
+            f"expiryDate={self.reservation_expiry_date}")
 
-    async def interactive_reservation_handle(self, input_choice: str) -> bool:
-        """Handle reservation-related entries from a device's interactive menu.
-        Returns True if the input was handled."""
-        if input_choice == "3":
-            self.logger.info(
-                f"Reservation state: id={self.reservation_id}, "
-                f"connectorId={self.reservation_connector_id}, "
-                f"idTag={self.reservation_id_tag}, "
-                f"parentIdTag={self.reservation_parent_id_tag}, "
-                f"expiryDate={self.reservation_expiry_date}")
-            return True
-        if input_choice == "4":
-            reservation_id_input: str = await aioconsole.ainput("reservationId (integer):\n")
-            connector_id_input: str = await aioconsole.ainput("connectorId:\n")
-            id_tag_input: str = await aioconsole.ainput("idTag:\n")
-            parent_id_tag_input: str = await aioconsole.ainput("parentIdTag (blank to skip):\n")
-            expiry_date_input: str = await aioconsole.ainput("expiryDate ISO (blank for now+1h):\n")
-            options: typing.Dict[str, typing.Any] = {
-                "reservationId": int(reservation_id_input) if reservation_id_input else None,
-                "connectorId": int(connector_id_input) if connector_id_input else None,
-                "evseId": int(connector_id_input) if connector_id_input else None,
-                "idTag": id_tag_input or None,
-                "parentIdTag": parent_id_tag_input or None,
-                "expiryDate": expiry_date_input or (
-                    self.utcnow() + datetime.timedelta(hours=1)).isoformat(),
-            }
-            await self.flow_reserve(options)
-            return True
-        if input_choice == "5":
-            cancel_input: str = await aioconsole.ainput(
-                "reservationId (blank uses stored):\n")
-            cancel_reservation_id: typing.Optional[int] = (
-                int(cancel_input) if cancel_input else self.reservation_id)
-            await self.flow_reservation_cancel(cancel_reservation_id)
-            return True
-        return False
+    async def interactive_reservation_make(self) -> None:
+        """Prompt for ReserveNow fields and run flow_reserve."""
+        reservation_id_input: str = await utility.prompt_text("reservationId (integer):")
+        connector_id_input: str = await utility.prompt_text("connectorId:")
+        id_tag_input: str = await utility.prompt_text("idTag:")
+        parent_id_tag_input: str = await utility.prompt_text("parentIdTag (blank to skip):")
+        expiry_date_input: str = await utility.prompt_text(
+            "expiryDate ISO (blank for now+1h):")
+        options: typing.Dict[str, typing.Any] = {
+            "reservationId": int(reservation_id_input) if reservation_id_input else None,
+            "connectorId": int(connector_id_input) if connector_id_input else None,
+            "evseId": int(connector_id_input) if connector_id_input else None,
+            "idTag": id_tag_input or None,
+            "parentIdTag": parent_id_tag_input or None,
+            "expiryDate": expiry_date_input or (
+                self.utcnow() + datetime.timedelta(hours=1)).isoformat(),
+        }
+        await self.flow_reserve(options)
+
+    async def interactive_reservation_cancel(self) -> None:
+        """Prompt for a reservationId (blank uses stored) and run flow_reservation_cancel."""
+        cancel_input: str = await utility.prompt_text(
+            "reservationId (blank uses stored):")
+        cancel_reservation_id: typing.Optional[int] = (
+            int(cancel_input) if cancel_input else self.reservation_id)
+        await self.flow_reservation_cancel(cancel_reservation_id)
 
     async def flow_reservation_cancel(
         self,

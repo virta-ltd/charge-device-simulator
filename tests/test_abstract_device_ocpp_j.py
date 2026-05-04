@@ -376,31 +376,24 @@ class TestConsumeReservationIfUsed:
         assert ocpp_j_device.reservation_id == 99
 
 
-class TestInteractiveReservationHandle:
+class TestInteractiveReservationHandlers:
     @pytest.mark.asyncio
-    async def test_show_state_returns_true_without_side_effects(self, ocpp_j_device):
+    async def test_show_state_does_not_invoke_flows(self, ocpp_j_device):
         _seed_reservation(ocpp_j_device, reservation_id=42)
         ocpp_j_device.flow_reserve = AsyncMock()
         ocpp_j_device.flow_reservation_cancel = AsyncMock()
 
-        result = await ocpp_j_device.interactive_reservation_handle("3")
+        await ocpp_j_device.interactive_reservation_show()
 
-        assert result is True
-        # No reservation flows are kicked off by "show state"
         ocpp_j_device.flow_reserve.assert_not_awaited()
         ocpp_j_device.flow_reservation_cancel.assert_not_awaited()
-        # State unchanged
         assert ocpp_j_device.reservation_id == 42
-
-    @pytest.mark.asyncio
-    async def test_unknown_input_returns_false(self, ocpp_j_device):
-        assert await ocpp_j_device.interactive_reservation_handle("99") is False
-        assert await ocpp_j_device.interactive_reservation_handle("0") is False
 
     @pytest.mark.asyncio
     async def test_make_reservation_collects_inputs_and_invokes_flow(self, ocpp_j_device):
         ocpp_j_device.flow_reserve = AsyncMock(return_value=True)
-        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input:
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
             mock_input.side_effect = [
                 "55",                 # reservationId
                 "2",                  # connectorId
@@ -408,9 +401,8 @@ class TestInteractiveReservationHandle:
                 "GROUP-X",            # parentIdTag
                 "2025-01-15T13:00:00+00:00",  # expiryDate
             ]
-            result = await ocpp_j_device.interactive_reservation_handle("4")
+            await ocpp_j_device.interactive_reservation_make()
 
-        assert result is True
         passed_options = ocpp_j_device.flow_reserve.await_args.args[0]
         assert passed_options["reservationId"] == 55
         assert passed_options["connectorId"] == 2
@@ -422,9 +414,10 @@ class TestInteractiveReservationHandle:
     @pytest.mark.asyncio
     async def test_make_reservation_blank_parent_and_expiry_use_defaults(self, ocpp_j_device):
         ocpp_j_device.flow_reserve = AsyncMock(return_value=True)
-        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input:
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
             mock_input.side_effect = ["10", "1", "X", "", ""]
-            await ocpp_j_device.interactive_reservation_handle("4")
+            await ocpp_j_device.interactive_reservation_make()
 
         passed_options = ocpp_j_device.flow_reserve.await_args.args[0]
         assert passed_options["parentIdTag"] is None
@@ -436,9 +429,10 @@ class TestInteractiveReservationHandle:
         _seed_reservation(ocpp_j_device, reservation_id=42)
         ocpp_j_device.flow_reservation_cancel = AsyncMock(return_value=True)
 
-        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input:
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
             mock_input.side_effect = [""]
-            await ocpp_j_device.interactive_reservation_handle("5")
+            await ocpp_j_device.interactive_reservation_cancel()
 
         ocpp_j_device.flow_reservation_cancel.assert_awaited_once_with(42)
 
@@ -447,9 +441,10 @@ class TestInteractiveReservationHandle:
         _seed_reservation(ocpp_j_device, reservation_id=42)
         ocpp_j_device.flow_reservation_cancel = AsyncMock(return_value=True)
 
-        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input:
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
             mock_input.side_effect = ["999"]
-            await ocpp_j_device.interactive_reservation_handle("5")
+            await ocpp_j_device.interactive_reservation_cancel()
 
         ocpp_j_device.flow_reservation_cancel.assert_awaited_once_with(999)
 

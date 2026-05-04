@@ -7,10 +7,10 @@ import os
 import typing
 import uuid
 
-import aioconsole
 from .. import utility
 from ..abstract import DeviceAbstract
 from ..error_reasons import ErrorReasons
+from ..ocpp_enums import OCPP_16_CONNECTOR_STATUSES, OCPP_16_ERROR_CODES
 from ..ocpp_j.message_types import MessageTypes
 from .wsa_extension_plugin import WsAddressingExtensionPlugin
 from ...model.error_message import ErrorMessage
@@ -426,30 +426,30 @@ class DeviceOcppS(DeviceAbstract):
         pass
 
     async def loop_interactive_custom(self):
-        is_back = False
-        while not is_back:
-            input1 = await aioconsole.ainput(f"""
-What should I do? (enter the number + enter)
-0: Back
-1: HeartBeat
-2: StatusUpdate
-{self.interactive_reservation_menu}99: Full custom
-""")
-            if input1 == "0":
-                is_back = True
-            elif input1 == "1":
-                await self.action_heart_beat()
-            elif input1 == "2":
-                input1 = await aioconsole.ainput("Which status?\n")
-                input2 = await aioconsole.ainput("Which errorCode?\n")
-                input3 = await aioconsole.ainput("Which connector?\n")
-                await self.action_status_update_ocpp(input1, input2, {
-                    'connectorId': input3,
-                })
-            elif await self.interactive_reservation_handle(input1):
-                pass
-            elif input1 == "99":
-                input_action = await aioconsole.ainput("Enter full custom action name:\n")
-                input_payload = await aioconsole.ainput("Enter full custom payload:\n")
-                await self.by_device_req_send_raw(json.loads(input_payload), input_action)
-        pass
+        await utility.run_menu("What should I do?", [
+            utility.MenuEntry("Back", is_back=True, shortcut="0"),
+            utility.MenuEntry("HeartBeat", self.action_heart_beat, shortcut="1"),
+            utility.MenuEntry("StatusUpdate", self._interactive_status_update, shortcut="2"),
+            utility.MenuEntry("Show reservation state",
+                              self.interactive_reservation_show, shortcut="3"),
+            utility.MenuEntry("Make reservation (simulate ReserveNow)",
+                              self.interactive_reservation_make, shortcut="4"),
+            utility.MenuEntry("Cancel reservation (simulate CancelReservation)",
+                              self.interactive_reservation_cancel, shortcut="5"),
+            utility.MenuEntry("Full custom", self._interactive_full_custom, shortcut="s"),
+        ])
+
+    async def _interactive_status_update(self) -> None:
+        status: str = await utility.select_from_list(
+            "Which status?", OCPP_16_CONNECTOR_STATUSES)
+        error_code: str = await utility.select_from_list(
+            "Which errorCode?", OCPP_16_ERROR_CODES)
+        connector: str = await utility.prompt_text("Which connector?")
+        await self.action_status_update_ocpp(status, error_code, {
+            'connectorId': connector,
+        })
+
+    async def _interactive_full_custom(self) -> None:
+        input_action: str = await utility.prompt_text("Enter full custom action name:")
+        input_payload: str = await utility.prompt_text("Enter full custom payload:")
+        await self.by_device_req_send_raw(json.loads(input_payload), input_action)
