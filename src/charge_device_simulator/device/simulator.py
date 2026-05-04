@@ -128,6 +128,7 @@ What should I do? (enter the number + enter)
 1: Flow charge
 2: Flow heartbeat
 3: Flow authorize
+4: Flow charge with RFID swipe (enter idTag)
 99: Single message
 """)
             if input1 == "0":
@@ -138,6 +139,11 @@ What should I do? (enter the number + enter)
                 await self.device.flow_heartbeat()
             elif input1 == "3":
                 await self.device.flow_authorize(self.flow_charge_options)
+            elif input1 == "4":
+                swiped_id_tag = await aioconsole.ainput("Swipe RFID — enter idTag:\n")
+                swipe_options = dict(self.flow_charge_options)
+                swipe_options["idTag"] = swiped_id_tag
+                await self.device.flow_charge(True, swipe_options)
             elif input1 == "99":
                 await self.device.loop_interactive_custom()
         pass
