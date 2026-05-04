@@ -1,6 +1,8 @@
 import datetime
 import math
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from charge_device_simulator.device.ocpp_s.device_ocpp_s import DeviceOcppS
 
@@ -121,3 +123,140 @@ class TestDeviceOcppSOptionsPersistence:
         # Verify meterStop was added
         assert "meterStop" in options
         assert "chargeStopTime" in options
+
+
+def _seed_reservation(device, *, reservation_id=42, connector_id=1,
+                      id_tag="RFID-A", parent_id_tag=None):
+    device.reservation_set(
+        reservation_id=reservation_id,
+        connector_id=connector_id,
+        id_tag=id_tag,
+        parent_id_tag=parent_id_tag,
+        expiry_date="2025-01-15T13:00:00+00:00",
+    )
+
+
+class TestOcppSAuthorizeStashesParent:
+    @pytest.mark.asyncio
+    async def test_parent_id_tag_extracted_from_nested_id_tag_info(self, device_ocpp_s):
+        device_ocpp_s.by_device_req_send = AsyncMock(return_value={
+            "status": "Accepted",
+            "idTagInfo": {"status": "Accepted", "parentIdTag": "GROUP-X"},
+        })
+
+        ok = await device_ocpp_s.action_authorize({"idTag": "RFID-A"})
+
+        assert ok is True
+        assert device_ocpp_s._last_authorize_info["parent_id_tag"] == "GROUP-X"
+
+    @pytest.mark.asyncio
+    async def test_parent_id_tag_falls_back_to_top_level(self, device_ocpp_s):
+        device_ocpp_s.by_device_req_send = AsyncMock(return_value={
+            "status": "Accepted",
+            "parentIdTag": "GROUP-Y",
+        })
+
+        await device_ocpp_s.action_authorize({"idTag": "RFID-B"})
+
+        assert device_ocpp_s._last_authorize_info["parent_id_tag"] == "GROUP-Y"
+
+
+class TestOcppSStartTransactionWithReservation:
+    @pytest.mark.asyncio
+    async def test_id_tag_match_includes_reservation_id_in_start(self, device_ocpp_s):
+        _seed_reservation(device_ocpp_s, reservation_id=42, connector_id=1, id_tag="RFID-A")
+        device_ocpp_s._last_authorize_info = {"id_tag": "RFID-A", "parent_id_tag": None}
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return {"idTagInfo": {"status": "Accepted"}, "transactionId": 555}
+
+        device_ocpp_s.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        options = {"connectorId": 1, "idTag": "RFID-A"}
+        assert device_ocpp_s._pre_charge_reservation_gate(options) is True
+        assert await device_ocpp_s.action_charge_start(options) is True
+        device_ocpp_s._consume_reservation_if_used(options)
+
+        assert captured["StartTransaction"]["reservationId"] == 42
+        assert not device_ocpp_s.reservation_is_active()
+
+    @pytest.mark.asyncio
+    async def test_parent_match_includes_reservation_id_in_start(self, device_ocpp_s):
+        _seed_reservation(device_ocpp_s, reservation_id=43, connector_id=1,
+                          id_tag="OWNER", parent_id_tag="GROUP-X")
+        device_ocpp_s._last_authorize_info = {"id_tag": "FRIEND", "parent_id_tag": "GROUP-X"}
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return {"idTagInfo": {"status": "Accepted"}, "transactionId": 556}
+
+        device_ocpp_s.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        options = {"connectorId": 1, "idTag": "FRIEND"}
+        assert device_ocpp_s._pre_charge_reservation_gate(options) is True
+        assert await device_ocpp_s.action_charge_start(options) is True
+
+        assert captured["StartTransaction"]["reservationId"] == 43
+
+
+class TestOcppSInboundReserveAndCancel:
+    """Replaces flow_reserve / flow_reservation_cancel with plain Mocks and stubs
+    run_with_delay so the background task is not actually scheduled — keeps these
+    focused on the inbound response decision."""
+
+    @pytest.mark.asyncio
+    async def test_reserve_now_accepted_and_schedules_flow(self, device_ocpp_s):
+        device_ocpp_s.flow_reserve = MagicMock()
+
+        with patch("charge_device_simulator.device.utility.run_with_delay", return_value=None):
+            resp = await device_ocpp_s.by_middleware_req("req1", "reservenow", {
+                "reservationId": 7, "connectorId": 1, "idTag": "X",
+                "expiryDate": "2025-01-15T13:00:00+00:00"
+            })
+
+        assert resp == {"status": "Accepted"}
+        device_ocpp_s.flow_reserve.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_reservation_accepted_when_id_matches(self, device_ocpp_s):
+        _seed_reservation(device_ocpp_s, reservation_id=42)
+        device_ocpp_s.flow_reservation_cancel = MagicMock()
+
+        with patch("charge_device_simulator.device.utility.run_with_delay", return_value=None):
+            resp = await device_ocpp_s.by_middleware_req("req1", "cancelreservation",
+                                                         {"reservationId": 42})
+
+        assert resp == {"status": "Accepted"}
+        device_ocpp_s.flow_reservation_cancel.assert_called_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_cancel_reservation_rejected_for_unknown_id(self, device_ocpp_s):
+        _seed_reservation(device_ocpp_s, reservation_id=42)
+
+        resp = await device_ocpp_s.by_middleware_req("req1", "cancelreservation",
+                                                     {"reservationId": 999})
+
+        assert resp == {"status": "Rejected"}
+
+
+class TestOcppSFlowReserveStatusPayload:
+    @pytest.mark.asyncio
+    async def test_reserved_status_uses_status_field(self, device_ocpp_s):
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return {}
+
+        device_ocpp_s.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        ok = await device_ocpp_s.flow_reserve({
+            "reservationId": 5, "connectorId": 1, "idTag": "X"
+        })
+
+        assert ok is True
+        assert captured["StatusNotification"]["status"] == "Reserved"
+        assert captured["StatusNotification"]["connectorId"] == 1

@@ -122,6 +122,27 @@ class TestSimulatorOptionsPersistence:
         assert id(simulator.flow_charge_options) == original_id
 
 
+class TestSimulatorRfidSwipe:
+    @pytest.mark.asyncio
+    async def test_rfid_swipe_passes_entered_id_tag_without_mutating_config(self, simulator, mock_device):
+        original_options = simulator.flow_charge_options
+        original_id = id(original_options)
+        original_id_tag = original_options.get("idTag")
+
+        with patch('aioconsole.ainput', new_callable=AsyncMock) as mock_input:
+            mock_input.side_effect = ["4", "RFID-SWIPED-TAG", "0"]
+            await simulator.loop_interactive()
+
+        mock_device.flow_charge.assert_called_once()
+        passed_options = mock_device.flow_charge.call_args.args[1]
+        assert passed_options["idTag"] == "RFID-SWIPED-TAG"
+        # Configured options must not be mutated
+        assert simulator.flow_charge_options.get("idTag") == original_id_tag
+        assert id(simulator.flow_charge_options) == original_id
+        # The swipe options were a copy, not the same dict
+        assert passed_options is not simulator.flow_charge_options
+
+
 class TestSimulatorErrorHandling:
     """Tests for simulator error handling."""
 
