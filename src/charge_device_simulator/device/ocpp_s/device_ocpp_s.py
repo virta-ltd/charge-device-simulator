@@ -154,13 +154,32 @@ class DeviceOcppS(DeviceAbstract):
     async def action_authorize(self, options: dict) -> bool:
         action = "Authorize"
         self.logger.info(f"Action {action} Start")
+        id_tag = options.get("idTag", "-")
         req_payload = {
-            "idTag": options.get("idTag", "-")
+            "idTag": id_tag
         }
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
+        # Per the OCPP 1.5/1.6 SOAP schema, parentIdTag lives inside idTagInfo.
+        # Fall back to the top level for tolerance with non-standard responses.
+        def _lookup(obj, key):
+            if obj is None:
+                return None
+            if hasattr(obj, "get"):
+                try:
+                    return obj.get(key)
+                except Exception:
+                    return None
+            return getattr(obj, key, None)
+
+        info = _lookup(resp_payload, "idTagInfo") or resp_payload
+        parent_id_tag = _lookup(info, "parentIdTag")
+        self._last_authorize_info = {
+            "id_tag": id_tag,
+            "parent_id_tag": parent_id_tag,
+        }
         self.logger.info(f"Action {action} End")
         return True
 
@@ -196,6 +215,8 @@ class DeviceOcppS(DeviceAbstract):
             "meterStart": options["meterStart"],
             "idTag": options.get("idTag", "-")
         }
+        if "reservationId" in options:
+            req_payload["reservationId"] = options["reservationId"]
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['idTagInfo']['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
@@ -276,9 +297,13 @@ class DeviceOcppS(DeviceAbstract):
         if not await self.action_authorize(options):
             self.charge_in_progress = False
             return False
+        if not self._pre_charge_reservation_gate(options):
+            self.charge_in_progress = False
+            return False
         if not await self.action_charge_start(options):
             self.charge_in_progress = False
             return False
+        self._consume_reservation_if_used(options)
         if not await self.action_status_update("Preparing", options):
             self.charge_in_progress = False
             return False
@@ -336,8 +361,6 @@ class DeviceOcppS(DeviceAbstract):
             "UnlockConnector",
             "UpdateFirmware",
             "SendLocalList",
-            "CancelReservation",
-            "ReserveNow",
             "Reset",
             "DataTransfer",
         ]):
@@ -374,6 +397,24 @@ class DeviceOcppS(DeviceAbstract):
             else:
                 asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
 
+        if req_action == "ReserveNow".lower():
+            reserve_options = self._reserve_now_options_from_payload(req_payload)
+            if reserve_options.get("connectorId") is None:
+                resp_payload = {"status": "Rejected"}
+            elif not self.reserve_can_accept(reserve_options.get("connectorId")):
+                resp_payload = {"status": "Occupied"}
+            else:
+                resp_payload = {"status": "Accepted"}
+                asyncio.create_task(utility.run_with_delay(self.flow_reserve(reserve_options), 2))
+
+        if req_action == "CancelReservation".lower():
+            reservation_id = req_payload.get("reservationId")
+            if not self.reserve_can_cancel(reservation_id):
+                resp_payload = {"status": "Rejected"}
+            else:
+                resp_payload = {"status": "Accepted"}
+                asyncio.create_task(utility.run_with_delay(self.flow_reservation_cancel(reservation_id), 2))
+
         if req_action == "Reset".lower():
             asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))
 
@@ -386,12 +427,12 @@ class DeviceOcppS(DeviceAbstract):
     async def loop_interactive_custom(self):
         is_back = False
         while not is_back:
-            input1 = await aioconsole.ainput("""
+            input1 = await aioconsole.ainput(f"""
 What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
-99: Full custom
+{self.interactive_reservation_menu}99: Full custom
 """)
             if input1 == "0":
                 is_back = True
@@ -404,6 +445,8 @@ What should I do? (enter the number + enter)
                 await self.action_status_update_ocpp(input1, input2, {
                     'connectorId': input3,
                 })
+            elif await self.interactive_reservation_handle(input1):
+                pass
             elif input1 == "99":
                 input_action = await aioconsole.ainput("Enter full custom action name:\n")
                 input_payload = await aioconsole.ainput("Enter full custom payload:\n")
