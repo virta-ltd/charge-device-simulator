@@ -81,6 +81,12 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
+        id_token_info = resp_json[2][key_name]
+        group_id_token = id_token_info.get("groupIdToken") or {}
+        self._last_authorize_info = {
+            "id_tag": id_tag,
+            "parent_id_tag": group_id_token.get("idToken"),
+        }
         self.logger.info(f"Action {action} End")
         return True
 
@@ -102,6 +108,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 "transactionId": transaction_id,
                 "chargingState":"Idle"
             },
+            **({"reservationId": options["reservationId"]} if "reservationId" in options else {}),
             "meterValue":[
                 {
                     "sampledValue": [
@@ -235,12 +242,16 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         if not await self.action_authorize(options):
             self.charge_in_progress = False
             return False
+        if not self._pre_charge_reservation_gate(options):
+            self.charge_in_progress = False
+            return False
         if not await self.action_status_update("Occupied", options):
             self.charge_in_progress = False
             return False
         if not await self.action_charge_start(options):
             self.charge_in_progress = False
             return False
+        self._consume_reservation_if_used(options)
         if not await self.flow_charge_ongoing_loop(auto_stop, options):
             self.charge_in_progress = False
             return False
@@ -254,15 +265,28 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.charge_in_progress = False
         return True
 
+    def _reserve_now_options_from_payload(self, req_payload: dict) -> dict:
+        id_token = req_payload.get("idToken") or {}
+        group_id_token = req_payload.get("groupIdToken") or {}
+        evse_id = req_payload.get("evseId")
+        return {
+            "reservationId": req_payload.get("id"),
+            "connectorId": evse_id if evse_id is not None else 1,
+            "evseId": evse_id if evse_id is not None else 1,
+            "idTag": id_token.get("idToken"),
+            "parentIdTag": group_id_token.get("idToken"),
+            "expiryDate": req_payload.get("expiryDateTime"),
+        }
+
     async def loop_interactive_custom(self):
         is_back = False
         while not is_back:
-            input1 = await aioconsole.ainput("""
+            input1 = await aioconsole.ainput(f"""
 What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
-99: Full custom
+{self.interactive_reservation_menu}99: Full custom
 """)
             if input1 == "0":
                 is_back = True
@@ -276,6 +300,8 @@ What should I do? (enter the number + enter)
                     'evseId': int(input2),
                     'connectorId': int(input3),
                 })
+            elif await self.interactive_reservation_handle(input1):
+                pass
             elif input1 == "99":
                 input1 = input("Enter full custom message:\n")
                 await self.by_device_req_send_raw(input1, "Custom")

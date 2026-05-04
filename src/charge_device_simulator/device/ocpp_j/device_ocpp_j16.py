@@ -75,6 +75,11 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
+        id_tag_info = resp_json[2][key_name]
+        self._last_authorize_info = {
+            "id_tag": id_tag,
+            "parent_id_tag": id_tag_info.get("parentIdTag"),
+        }
         self.logger.info(f"Action {action} End")
         return True
 
@@ -91,6 +96,8 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             "meterStart": options["meterStart"],
             "idTag": id_tag
         }
+        if "reservationId" in options:
+            json_payload["reservationId"] = options["reservationId"]
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
@@ -147,12 +154,12 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
     async def loop_interactive_custom(self):
         is_back = False
         while not is_back:
-            input1 = await aioconsole.ainput("""
+            input1 = await aioconsole.ainput(f"""
 What should I do? (enter the number + enter)
 0: Back
 1: HeartBeat
 2: StatusUpdate
-99: Full custom
+{self.interactive_reservation_menu}99: Full custom
 """)
             if input1 == "0":
                 is_back = True
@@ -165,6 +172,8 @@ What should I do? (enter the number + enter)
                 await self.action_status_update_ocpp(input1, input2, {
                     'connectorId': input3,
                 })
+            elif await self.interactive_reservation_handle(input1):
+                pass
             elif input1 == "99":
                 input1 = input("Enter full custom message:\n")
                 await self.by_device_req_send_raw(input1, "Custom")

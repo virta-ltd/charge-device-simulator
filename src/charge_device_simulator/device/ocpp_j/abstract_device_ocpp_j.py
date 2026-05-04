@@ -166,9 +166,13 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not await self.action_authorize(options):
             self.charge_in_progress = False
             return False
+        if not self._pre_charge_reservation_gate(options):
+            self.charge_in_progress = False
+            return False
         if not await self.action_charge_start(options):
             self.charge_in_progress = False
             return False
+        self._consume_reservation_if_used(options)
         if not await self.action_status_update("Preparing", options):
             self.charge_in_progress = False
             return False
@@ -270,8 +274,6 @@ class AbstractDeviceOcppJ(DeviceAbstract):
             "UnlockConnector",
             "UpdateFirmware",
             "SendLocalList",
-            "CancelReservation",
-            "ReserveNow",
             "Reset",
             "DataTransfer",
             "RequestStartTransaction",
@@ -339,6 +341,24 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 resp_payload["status"] = "Rejected"
             else:
                 next_async_task = utility.run_with_delay(self.flow_charge_stop(), 2)
+
+        if req_action == "ReserveNow".lower():
+            reserve_options = self._reserve_now_options_from_payload(req_payload)
+            if reserve_options.get("connectorId") is None:
+                resp_payload = {"status": "Rejected"}
+            elif not self.reserve_can_accept(reserve_options.get("connectorId")):
+                resp_payload = {"status": "Occupied"}
+            else:
+                resp_payload = {"status": "Accepted"}
+                next_async_task = utility.run_with_delay(self.flow_reserve(reserve_options), 2)
+
+        if req_action == "CancelReservation".lower():
+            reservation_id = req_payload.get("reservationId")
+            if not self.reserve_can_cancel(reservation_id):
+                resp_payload = {"status": "Rejected"}
+            else:
+                resp_payload = {"status": "Accepted"}
+                next_async_task = utility.run_with_delay(self.flow_reservation_cancel(reservation_id), 2)
 
         if req_action == "Reset".lower():
             next_async_task = utility.run_with_delay(self.re_initialize(), 2)
