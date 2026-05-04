@@ -4,6 +4,7 @@ import datetime
 import logging
 import os
 import sys
+import typing
 
 import aioconsole
 
@@ -13,20 +14,20 @@ from .error_reasons import ErrorReasons
 class DeviceAbstract(abc.ABC):
     on_error = []
 
-    def __init__(self, device_id):
-        self.register_on_initialize = True
-        self.deviceId = device_id
-        self.name = ''
-        self.charge_in_progress = False
-        self.charge_id = -1
-        self.reservation_id = None
-        self.reservation_connector_id = None
-        self.reservation_id_tag = None
-        self.reservation_parent_id_tag = None
-        self.reservation_expiry_date = None
-        self._last_authorize_info = None
+    def __init__(self, device_id: str):
+        self.register_on_initialize: bool = True
+        self.deviceId: str = device_id
+        self.name: str = ''
+        self.charge_in_progress: bool = False
+        self.charge_id: typing.Any = -1
+        self.reservation_id: typing.Optional[int] = None
+        self.reservation_connector_id: typing.Optional[int] = None
+        self.reservation_id_tag: typing.Optional[str] = None
+        self.reservation_parent_id_tag: typing.Optional[str] = None
+        self.reservation_expiry_date: typing.Optional[str] = None
+        self._last_authorize_info: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None
         envKey = 'RESPONSE_TIMEOUT_SECONDS'
-        self.response_timeout_seconds = int(os.environ[envKey]) if envKey in os.environ else 15
+        self.response_timeout_seconds: int = int(os.environ[envKey]) if envKey in os.environ else 15
 
     @property
     @abc.abstractmethod
@@ -160,31 +161,38 @@ class DeviceAbstract(abc.ABC):
     def reservation_is_active(self) -> bool:
         return self.reservation_id is not None
 
-    def reserve_can_accept(self, connector_id) -> bool:
+    def reserve_can_accept(self, connector_id: typing.Optional[int]) -> bool:
         if self.charge_in_progress:
             return False
         if self.reservation_is_active() and self.reservation_connector_id == connector_id:
             return False
         return True
 
-    def reserve_can_cancel(self, reservation_id) -> bool:
+    def reserve_can_cancel(self, reservation_id: typing.Optional[int]) -> bool:
         return self.reservation_is_active() and self.reservation_id == reservation_id
 
-    def reservation_set(self, reservation_id, connector_id, id_tag, parent_id_tag, expiry_date):
+    def reservation_set(
+        self,
+        reservation_id: typing.Optional[int],
+        connector_id: typing.Optional[int],
+        id_tag: typing.Optional[str],
+        parent_id_tag: typing.Optional[str],
+        expiry_date: typing.Optional[str],
+    ) -> None:
         self.reservation_id = reservation_id
         self.reservation_connector_id = connector_id
         self.reservation_id_tag = id_tag
         self.reservation_parent_id_tag = parent_id_tag
         self.reservation_expiry_date = expiry_date
 
-    def reservation_clear(self):
+    def reservation_clear(self) -> None:
         self.reservation_id = None
         self.reservation_connector_id = None
         self.reservation_id_tag = None
         self.reservation_parent_id_tag = None
         self.reservation_expiry_date = None
 
-    def _pre_charge_reservation_gate(self, options: dict) -> bool:
+    def _pre_charge_reservation_gate(self, options: typing.Dict[str, typing.Any]) -> bool:
         """If the connector has an active reservation, validate the most recent
         authorize info against it (direct idTag or parent/group match). On match,
         injects reservationId into options so the start payload carries it."""
@@ -206,13 +214,15 @@ class DeviceAbstract(abc.ABC):
             f"{self.reservation_id} on connector {connector_id}")
         return False
 
-    def _consume_reservation_if_used(self, options: dict):
+    def _consume_reservation_if_used(self, options: typing.Dict[str, typing.Any]) -> None:
         if "reservationId" in options and self.reservation_is_active() \
                 and options["reservationId"] == self.reservation_id:
             self.logger.info(f"Reservation {self.reservation_id} consumed by charge start")
             self.reservation_clear()
 
-    def _reserve_now_options_from_payload(self, req_payload: dict) -> dict:
+    def _reserve_now_options_from_payload(
+        self, req_payload: typing.Dict[str, typing.Any],
+    ) -> typing.Dict[str, typing.Any]:
         """Convert an inbound ReserveNow.req payload into the dict shape
         flow_reserve expects. Default covers OCPP 1.6 / OCPP-S 1.5 SOAP.
         Overridden for OCPP 2.0.1."""
@@ -224,13 +234,13 @@ class DeviceAbstract(abc.ABC):
             "expiryDate": req_payload.get("expiryDate"),
         }
 
-    async def flow_reserve(self, options: dict) -> bool:
+    async def flow_reserve(self, options: typing.Dict[str, typing.Any]) -> bool:
         """Apply a ReserveNow request: validate, store state, send Reserved
         StatusNotification. Returns True if reservation was accepted."""
         log_title = self.flow_reserve.__name__
         self.logger.info(f"Flow {log_title} Start: connectorId={options.get('connectorId')}, "
                          f"reservationId={options.get('reservationId')}")
-        connector_id = options.get("connectorId")
+        connector_id: typing.Optional[int] = options.get("connectorId")
         if not self.reserve_can_accept(connector_id):
             self.logger.info(f"Flow {log_title} Rejected (connector busy or already reserved)")
             return False
@@ -246,7 +256,7 @@ class DeviceAbstract(abc.ABC):
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    interactive_reservation_menu = """3: Show reservation state
+    interactive_reservation_menu: str = """3: Show reservation state
 4: Make reservation (simulate ReserveNow)
 5: Cancel reservation (simulate CancelReservation)
 """
@@ -263,39 +273,42 @@ class DeviceAbstract(abc.ABC):
                 f"expiryDate={self.reservation_expiry_date}")
             return True
         if input_choice == "4":
-            reservation_id = await aioconsole.ainput("reservationId (integer):\n")
-            connector_id = await aioconsole.ainput("connectorId:\n")
-            id_tag = await aioconsole.ainput("idTag:\n")
-            parent_id_tag = await aioconsole.ainput("parentIdTag (blank to skip):\n")
-            expiry_date = await aioconsole.ainput("expiryDate ISO (blank for now+1h):\n")
-            options = {
-                "reservationId": int(reservation_id) if reservation_id else None,
-                "connectorId": int(connector_id) if connector_id else None,
-                "evseId": int(connector_id) if connector_id else None,
-                "idTag": id_tag or None,
-                "parentIdTag": parent_id_tag or None,
-                "expiryDate": expiry_date or (
+            reservation_id_input: str = await aioconsole.ainput("reservationId (integer):\n")
+            connector_id_input: str = await aioconsole.ainput("connectorId:\n")
+            id_tag_input: str = await aioconsole.ainput("idTag:\n")
+            parent_id_tag_input: str = await aioconsole.ainput("parentIdTag (blank to skip):\n")
+            expiry_date_input: str = await aioconsole.ainput("expiryDate ISO (blank for now+1h):\n")
+            options: typing.Dict[str, typing.Any] = {
+                "reservationId": int(reservation_id_input) if reservation_id_input else None,
+                "connectorId": int(connector_id_input) if connector_id_input else None,
+                "evseId": int(connector_id_input) if connector_id_input else None,
+                "idTag": id_tag_input or None,
+                "parentIdTag": parent_id_tag_input or None,
+                "expiryDate": expiry_date_input or (
                     self.utcnow() + datetime.timedelta(hours=1)).isoformat(),
             }
             await self.flow_reserve(options)
             return True
         if input_choice == "5":
-            reservation_id_input = await aioconsole.ainput(
+            cancel_input: str = await aioconsole.ainput(
                 "reservationId (blank uses stored):\n")
-            reservation_id = (int(reservation_id_input)
-                              if reservation_id_input
-                              else self.reservation_id)
-            await self.flow_reservation_cancel(reservation_id)
+            cancel_reservation_id: typing.Optional[int] = (
+                int(cancel_input) if cancel_input else self.reservation_id)
+            await self.flow_reservation_cancel(cancel_reservation_id)
             return True
         return False
 
-    async def flow_reservation_cancel(self, reservation_id, options: dict = None) -> bool:
+    async def flow_reservation_cancel(
+        self,
+        reservation_id: typing.Optional[int],
+        options: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> bool:
         log_title = self.flow_reservation_cancel.__name__
         self.logger.info(f"Flow {log_title} Start: reservationId={reservation_id}")
         if not self.reserve_can_cancel(reservation_id):
             self.logger.info(f"Flow {log_title} Rejected (no matching reservation)")
             return False
-        notify_options = dict(options) if options else {}
+        notify_options: typing.Dict[str, typing.Any] = dict(options) if options else {}
         notify_options.setdefault("connectorId", self.reservation_connector_id)
         self.reservation_clear()
         if not await self.action_status_update("Available", notify_options):

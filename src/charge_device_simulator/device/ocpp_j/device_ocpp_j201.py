@@ -1,5 +1,6 @@
 import datetime
 import sys
+import typing
 import uuid
 
 import aioconsole
@@ -81,8 +82,8 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
-        id_token_info = resp_json[2][key_name]
-        group_id_token = id_token_info.get("groupIdToken") or {}
+        id_token_info: typing.Dict[str, typing.Any] = resp_json[2][key_name]
+        group_id_token: typing.Dict[str, typing.Any] = id_token_info.get("groupIdToken") or {}
         self._last_authorize_info = {
             "id_tag": id_tag,
             "parent_id_tag": group_id_token.get("idToken"),
@@ -265,10 +266,12 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
         self.charge_in_progress = False
         return True
 
-    def _reserve_now_options_from_payload(self, req_payload: dict) -> dict:
-        id_token = req_payload.get("idToken") or {}
-        group_id_token = req_payload.get("groupIdToken") or {}
-        evse_id = req_payload.get("evseId")
+    def _reserve_now_options_from_payload(
+        self, req_payload: typing.Dict[str, typing.Any],
+    ) -> typing.Dict[str, typing.Any]:
+        id_token: typing.Dict[str, typing.Any] = req_payload.get("idToken") or {}
+        group_id_token: typing.Dict[str, typing.Any] = req_payload.get("groupIdToken") or {}
+        evse_id: typing.Optional[int] = req_payload.get("evseId")
         return {
             "reservationId": req_payload.get("id"),
             "connectorId": evse_id if evse_id is not None else 1,

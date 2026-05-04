@@ -1,4 +1,5 @@
 import sys
+import typing
 
 import aioconsole
 
@@ -75,7 +76,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
             await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
             return False
-        id_tag_info = resp_json[2][key_name]
+        id_tag_info: typing.Dict[str, typing.Any] = resp_json[2][key_name]
         self._last_authorize_info = {
             "id_tag": id_tag,
             "parent_id_tag": id_tag_info.get("parentIdTag"),

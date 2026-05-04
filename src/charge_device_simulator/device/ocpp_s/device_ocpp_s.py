@@ -164,7 +164,7 @@ class DeviceOcppS(DeviceAbstract):
             return False
         # Per the OCPP 1.5/1.6 SOAP schema, parentIdTag lives inside idTagInfo.
         # Fall back to the top level for tolerance with non-standard responses.
-        def _lookup(obj, key):
+        def _lookup(obj: typing.Any, key: str) -> typing.Any:
             if obj is None:
                 return None
             if hasattr(obj, "get"):
@@ -174,8 +174,8 @@ class DeviceOcppS(DeviceAbstract):
                     return None
             return getattr(obj, key, None)
 
-        info = _lookup(resp_payload, "idTagInfo") or resp_payload
-        parent_id_tag = _lookup(info, "parentIdTag")
+        info: typing.Any = _lookup(resp_payload, "idTagInfo") or resp_payload
+        parent_id_tag: typing.Optional[str] = _lookup(info, "parentIdTag")
         self._last_authorize_info = {
             "id_tag": id_tag,
             "parent_id_tag": parent_id_tag,
@@ -398,7 +398,7 @@ class DeviceOcppS(DeviceAbstract):
                 asyncio.create_task(utility.run_with_delay(self.flow_charge_stop(), 2))
 
         if req_action == "ReserveNow".lower():
-            reserve_options = self._reserve_now_options_from_payload(req_payload)
+            reserve_options: typing.Dict[str, typing.Any] = self._reserve_now_options_from_payload(req_payload)
             if reserve_options.get("connectorId") is None:
                 resp_payload = {"status": "Rejected"}
             elif not self.reserve_can_accept(reserve_options.get("connectorId")):
@@ -408,12 +408,13 @@ class DeviceOcppS(DeviceAbstract):
                 asyncio.create_task(utility.run_with_delay(self.flow_reserve(reserve_options), 2))
 
         if req_action == "CancelReservation".lower():
-            reservation_id = req_payload.get("reservationId")
-            if not self.reserve_can_cancel(reservation_id):
+            cancel_reservation_id: typing.Optional[int] = req_payload.get("reservationId")
+            if not self.reserve_can_cancel(cancel_reservation_id):
                 resp_payload = {"status": "Rejected"}
             else:
                 resp_payload = {"status": "Accepted"}
-                asyncio.create_task(utility.run_with_delay(self.flow_reservation_cancel(reservation_id), 2))
+                asyncio.create_task(utility.run_with_delay(
+                    self.flow_reservation_cancel(cancel_reservation_id), 2))
 
         if req_action == "Reset".lower():
             asyncio.create_task(utility.run_with_delay(self.re_initialize(), 2))

@@ -343,7 +343,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 next_async_task = utility.run_with_delay(self.flow_charge_stop(), 2)
 
         if req_action == "ReserveNow".lower():
-            reserve_options = self._reserve_now_options_from_payload(req_payload)
+            reserve_options: typing.Dict[str, typing.Any] = self._reserve_now_options_from_payload(req_payload)
             if reserve_options.get("connectorId") is None:
                 resp_payload = {"status": "Rejected"}
             elif not self.reserve_can_accept(reserve_options.get("connectorId")):
@@ -353,12 +353,13 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 next_async_task = utility.run_with_delay(self.flow_reserve(reserve_options), 2)
 
         if req_action == "CancelReservation".lower():
-            reservation_id = req_payload.get("reservationId")
-            if not self.reserve_can_cancel(reservation_id):
+            cancel_reservation_id: typing.Optional[int] = req_payload.get("reservationId")
+            if not self.reserve_can_cancel(cancel_reservation_id):
                 resp_payload = {"status": "Rejected"}
             else:
                 resp_payload = {"status": "Accepted"}
-                next_async_task = utility.run_with_delay(self.flow_reservation_cancel(reservation_id), 2)
+                next_async_task = utility.run_with_delay(
+                    self.flow_reservation_cancel(cancel_reservation_id), 2)
 
         if req_action == "Reset".lower():
             next_async_task = utility.run_with_delay(self.re_initialize(), 2)

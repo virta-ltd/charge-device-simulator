@@ -140,8 +140,8 @@ What should I do? (enter the number + enter)
             elif input1 == "3":
                 await self.device.flow_authorize(self.flow_charge_options)
             elif input1 == "4":
-                swiped_id_tag = await aioconsole.ainput("Swipe RFID — enter idTag:\n")
-                swipe_options = dict(self.flow_charge_options)
+                swiped_id_tag: str = await aioconsole.ainput("Swipe RFID — enter idTag:\n")
+                swipe_options: typing.Dict[str, typing.Any] = dict(self.flow_charge_options)
                 swipe_options["idTag"] = swiped_id_tag
                 await self.device.flow_charge(True, swipe_options)
             elif input1 == "99":
