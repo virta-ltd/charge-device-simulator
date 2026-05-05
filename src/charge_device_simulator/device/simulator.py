@@ -131,19 +131,26 @@ class Simulator:
             utility.MenuEntry("Flow charge", self._interactive_flow_charge, shortcut="1"),
             utility.MenuEntry("Flow heartbeat", self.device.flow_heartbeat, shortcut="2"),
             utility.MenuEntry("Flow authorize", self._interactive_flow_authorize, shortcut="3"),
-            utility.MenuEntry("Flow charge with RFID swipe",
-                              self._interactive_flow_rfid_swipe, shortcut="4"),
             utility.MenuEntry("Single message", self.device.loop_interactive_custom, shortcut="s"),
         ])
 
     async def _interactive_flow_charge(self) -> None:
-        await self.device.flow_charge(True, self.flow_charge_options)
+        options = await self._prompt_options_with_id_tag()
+        await self.device.flow_charge(True, options)
 
     async def _interactive_flow_authorize(self) -> None:
-        await self.device.flow_authorize(self.flow_charge_options)
+        options = await self._prompt_options_with_id_tag()
+        await self.device.flow_authorize(options)
 
-    async def _interactive_flow_rfid_swipe(self) -> None:
-        swiped_id_tag: str = await utility.prompt_text("Swipe RFID — enter idTag:")
-        swipe_options: typing.Dict[str, typing.Any] = dict(self.flow_charge_options)
-        swipe_options["idTag"] = swiped_id_tag
-        await self.device.flow_charge(True, swipe_options)
+    async def _prompt_options_with_id_tag(self) -> typing.Dict[str, typing.Any]:
+        """Prompt for an idTag, defaulting to the configured one. Returns the
+        stored options dict unchanged when the operator keeps the default
+        (preserves identity for any subsequent state mutation by actions); a
+        shallow copy with the override otherwise."""
+        default_id_tag: str = self.flow_charge_options.get("idTag", "")
+        chosen: str = await utility.prompt_text("idTag", default=default_id_tag)
+        if chosen == default_id_tag:
+            return self.flow_charge_options
+        options: typing.Dict[str, typing.Any] = dict(self.flow_charge_options)
+        options["idTag"] = chosen
+        return options

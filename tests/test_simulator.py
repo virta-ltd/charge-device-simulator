@@ -68,24 +68,21 @@ class TestSimulatorFlowOptionsPassedAsDict:
 
     @pytest.mark.asyncio
     async def test_interactive_flow_charge_receives_dict(self, simulator, mock_device):
-        """Test interactive mode passes dict to flow_charge."""
-        # Mock aioconsole.ainput to simulate user selecting "1" (flow charge) then "0" (exit)
+        """User picks Flow charge, hits Enter to keep the configured idTag."""
         with patch('aioconsole.ainput', new_callable=AsyncMock) as mock_input:
-            mock_input.side_effect = ["1", "0"]
+            mock_input.side_effect = ["1", "", "0"]
             await simulator.loop_interactive()
 
-        # Verify flow_charge was called with the options dict directly
+        # Keeping the default idTag means we hand the device the same dict ref
         mock_device.flow_charge.assert_called_once_with(True, simulator.flow_charge_options)
 
     @pytest.mark.asyncio
     async def test_interactive_flow_authorize_receives_dict(self, simulator, mock_device):
-        """Test interactive mode passes dict to flow_authorize."""
-        # Mock aioconsole.ainput to simulate user selecting "3" (authorize) then "0" (exit)
+        """User picks Flow authorize, hits Enter to keep the configured idTag."""
         with patch('aioconsole.ainput', new_callable=AsyncMock) as mock_input:
-            mock_input.side_effect = ["3", "0"]
+            mock_input.side_effect = ["3", "", "0"]
             await simulator.loop_interactive()
 
-        # Verify flow_authorize was called with the options dict directly
         mock_device.flow_authorize.assert_called_once_with(simulator.flow_charge_options)
 
 
@@ -122,15 +119,19 @@ class TestSimulatorOptionsPersistence:
         assert id(simulator.flow_charge_options) == original_id
 
 
-class TestSimulatorRfidSwipe:
+class TestSimulatorFlowChargeWithCustomIdTag:
+    """Operator picks Flow charge and types a different idTag than the
+    configured default — emulates an RFID swipe of a different card."""
+
     @pytest.mark.asyncio
-    async def test_rfid_swipe_passes_entered_id_tag_without_mutating_config(self, simulator, mock_device):
+    async def test_overridden_id_tag_passes_through_without_mutating_config(
+            self, simulator, mock_device):
         original_options = simulator.flow_charge_options
         original_id = id(original_options)
         original_id_tag = original_options.get("idTag")
 
         with patch('aioconsole.ainput', new_callable=AsyncMock) as mock_input:
-            mock_input.side_effect = ["4", "RFID-SWIPED-TAG", "0"]
+            mock_input.side_effect = ["1", "RFID-SWIPED-TAG", "0"]
             await simulator.loop_interactive()
 
         mock_device.flow_charge.assert_called_once()
@@ -139,7 +140,17 @@ class TestSimulatorRfidSwipe:
         # Configured options must not be mutated
         assert simulator.flow_charge_options.get("idTag") == original_id_tag
         assert id(simulator.flow_charge_options) == original_id
-        # The swipe options were a copy, not the same dict
+        # An override produces a copy, not the same dict reference
+        assert passed_options is not simulator.flow_charge_options
+
+    @pytest.mark.asyncio
+    async def test_authorize_with_overridden_id_tag(self, simulator, mock_device):
+        with patch('aioconsole.ainput', new_callable=AsyncMock) as mock_input:
+            mock_input.side_effect = ["3", "OTHER-TAG", "0"]
+            await simulator.loop_interactive()
+
+        passed_options = mock_device.flow_authorize.call_args.args[0]
+        assert passed_options["idTag"] == "OTHER-TAG"
         assert passed_options is not simulator.flow_charge_options
 
 
