@@ -5,3 +5,4 @@ pyyaml
 zeep[async]
 certifi
 pytest
+questionary>=2.0

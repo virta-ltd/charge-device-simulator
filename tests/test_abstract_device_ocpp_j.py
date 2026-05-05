@@ -1,6 +1,8 @@
 import datetime
 import math
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from charge_device_simulator.device.ocpp_j.abstract_device_ocpp_j import AbstractDeviceOcppJ
 
@@ -205,3 +207,365 @@ class TestOptionsPersistence:
 
         # All results should be increasing
         assert result1 < result2 < result3 < result4
+
+
+def _seed_reservation(device, *, reservation_id=42, connector_id=1,
+                      id_tag="RFID-A", parent_id_tag=None,
+                      expiry_date="2025-01-15T13:00:00+00:00"):
+    device.reservation_set(
+        reservation_id=reservation_id,
+        connector_id=connector_id,
+        id_tag=id_tag,
+        parent_id_tag=parent_id_tag,
+        expiry_date=expiry_date,
+    )
+
+
+class TestFlowReserve:
+    @pytest.mark.asyncio
+    async def test_accepted_stores_state_and_sends_reserved_status(self, ocpp_j_device):
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reserve({
+            "reservationId": 7,
+            "connectorId": 2,
+            "idTag": "RFID-A",
+            "parentIdTag": "GROUP-X",
+            "expiryDate": "2025-01-15T13:00:00+00:00",
+        })
+
+        assert result is True
+        assert ocpp_j_device.reservation_id == 7
+        assert ocpp_j_device.reservation_connector_id == 2
+        assert ocpp_j_device.reservation_id_tag == "RFID-A"
+        assert ocpp_j_device.reservation_parent_id_tag == "GROUP-X"
+        ocpp_j_device.action_status_update.assert_awaited_once()
+        assert ocpp_j_device.action_status_update.await_args.args[0] == "Reserved"
+
+    @pytest.mark.asyncio
+    async def test_rejected_when_charging(self, ocpp_j_device):
+        ocpp_j_device.charge_in_progress = True
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reserve({
+            "reservationId": 7, "connectorId": 1, "idTag": "RFID-A"
+        })
+
+        assert result is False
+        assert not ocpp_j_device.reservation_is_active()
+        ocpp_j_device.action_status_update.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rejected_when_connector_already_reserved(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=1, connector_id=1)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reserve({
+            "reservationId": 99, "connectorId": 1, "idTag": "OTHER"
+        })
+
+        assert result is False
+        # Existing reservation untouched
+        assert ocpp_j_device.reservation_id == 1
+        ocpp_j_device.action_status_update.assert_not_awaited()
+
+
+class TestFlowReservationCancel:
+    @pytest.mark.asyncio
+    async def test_accepted_clears_state_and_sends_available(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42, connector_id=3)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reservation_cancel(42)
+
+        assert result is True
+        assert not ocpp_j_device.reservation_is_active()
+        ocpp_j_device.action_status_update.assert_awaited_once()
+        args = ocpp_j_device.action_status_update.await_args.args
+        assert args[0] == "Available"
+        assert args[1]["connectorId"] == 3
+
+    @pytest.mark.asyncio
+    async def test_rejected_for_unknown_id_keeps_state(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42, connector_id=3)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reservation_cancel(999)
+
+        assert result is False
+        assert ocpp_j_device.reservation_id == 42
+        ocpp_j_device.action_status_update.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_explicit_options_are_passed_through_to_status_update(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42, connector_id=3)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reservation_cancel(
+            42, {"evseId": 7, "connectorId": 9})
+
+        assert result is True
+        passed = ocpp_j_device.action_status_update.await_args.args[1]
+        # Caller-provided connectorId must be preserved (not overwritten by setdefault)
+        assert passed["connectorId"] == 9
+        assert passed["evseId"] == 7
+
+
+class TestPreChargeReservationGate:
+    def test_no_reservation_passes(self, ocpp_j_device):
+        assert ocpp_j_device._pre_charge_reservation_gate({"connectorId": 1, "idTag": "X"}) is True
+
+    def test_reservation_on_other_connector_does_not_apply(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, connector_id=2, id_tag="RES-TAG")
+        options = {"connectorId": 1, "idTag": "OTHER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is True
+        assert "reservationId" not in options
+
+    def test_id_tag_match_injects_reservation_id(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=11, connector_id=1, id_tag="RES-TAG")
+        options = {"connectorId": 1, "idTag": "RES-TAG"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is True
+        assert options["reservationId"] == 11
+
+    def test_parent_match_injects_reservation_id(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=12, connector_id=1,
+                          id_tag="OWNER", parent_id_tag="GROUP-X")
+        ocpp_j_device._last_authorize_info = {"id_tag": "FRIEND", "parent_id_tag": "GROUP-X"}
+        options = {"connectorId": 1, "idTag": "FRIEND"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is True
+        assert options["reservationId"] == 12
+
+    def test_no_match_blocks_charge(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=13, connector_id=1,
+                          id_tag="OWNER", parent_id_tag="GROUP-X")
+        ocpp_j_device._last_authorize_info = {"id_tag": "INTRUDER", "parent_id_tag": "GROUP-Y"}
+        options = {"connectorId": 1, "idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+        assert "reservationId" not in options
+
+    def test_reservation_with_no_authorize_info_falls_through_to_id_tag_only(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=14, connector_id=1,
+                          id_tag="OWNER", parent_id_tag="GROUP-X")
+        ocpp_j_device._last_authorize_info = None
+        options = {"connectorId": 1, "idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+
+    def test_missing_connector_id_still_applies_gate_to_default_connector(self, ocpp_j_device):
+        # Reservation is on connector 1; user's options omit connectorId.
+        # Without the get-with-default, the gate would compare None vs 1 and
+        # silently let the charge through.
+        _seed_reservation(ocpp_j_device, reservation_id=15, connector_id=1,
+                          id_tag="OWNER", parent_id_tag="GROUP-X")
+        ocpp_j_device._last_authorize_info = {"id_tag": "INTRUDER", "parent_id_tag": "GROUP-Y"}
+        options = {"idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+        assert "reservationId" not in options
+
+
+class TestConsumeReservationIfUsed:
+    def test_clears_when_reservation_id_in_options_matches(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=99)
+        options = {"reservationId": 99}
+
+        ocpp_j_device._consume_reservation_if_used(options)
+
+        assert not ocpp_j_device.reservation_is_active()
+
+    def test_keeps_state_when_no_reservation_id_in_options(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=99)
+        ocpp_j_device._consume_reservation_if_used({})
+        assert ocpp_j_device.reservation_id == 99
+
+    def test_does_not_clear_when_reservation_ids_mismatch(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=99)
+        ocpp_j_device._consume_reservation_if_used({"reservationId": 100})
+        assert ocpp_j_device.reservation_id == 99
+
+
+class TestResetChargeCycleOptions:
+    """A second `flow_charge` invocation in an interactive session must not
+    replay the previous cycle's start/stop time or computed meterStop. The
+    same reset must NOT happen in non-interactive (frequent-flow) runs to
+    preserve historical behavior."""
+
+    def _stale_options(self):
+        return {
+            "idTag": "ABC",
+            "connectorId": 1,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "chargeStopTime": "2025-01-15T12:30:00+00:00",
+            "meterStop": 31000,
+            "meterStart": 1000,
+        }
+
+    def test_drops_stale_charge_cycle_keys_when_interactive(self, ocpp_j_device):
+        ocpp_j_device.interactive_mode = True
+        options = self._stale_options()
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert "chargeStartTime" not in options
+        assert "chargeStopTime" not in options
+        assert "meterStop" not in options
+        # Caller-supplied config (idTag, connectorId, meterStart) is untouched
+        assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
+
+    def test_keeps_options_when_not_interactive(self, ocpp_j_device):
+        # Default (interactive_mode=False) — frequent-flow / non-interactive run
+        options = self._stale_options()
+        snapshot = dict(options)
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options == snapshot
+
+
+class TestInteractiveReservationHandlers:
+    @pytest.mark.asyncio
+    async def test_show_state_does_not_invoke_flows(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42)
+        ocpp_j_device.flow_reserve = AsyncMock()
+        ocpp_j_device.flow_reservation_cancel = AsyncMock()
+
+        await ocpp_j_device.interactive_reservation_show()
+
+        ocpp_j_device.flow_reserve.assert_not_awaited()
+        ocpp_j_device.flow_reservation_cancel.assert_not_awaited()
+        assert ocpp_j_device.reservation_id == 42
+
+    @pytest.mark.asyncio
+    async def test_make_reservation_collects_inputs_and_invokes_flow(self, ocpp_j_device):
+        ocpp_j_device.flow_reserve = AsyncMock(return_value=True)
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
+            mock_input.side_effect = [
+                "55",                 # reservationId
+                "2",                  # connectorId
+                "RFID-A",             # idTag
+                "GROUP-X",            # parentIdTag
+                "2025-01-15T13:00:00+00:00",  # expiryDate
+            ]
+            await ocpp_j_device.interactive_reservation_make()
+
+        passed_options = ocpp_j_device.flow_reserve.await_args.args[0]
+        assert passed_options["reservationId"] == 55
+        assert passed_options["connectorId"] == 2
+        assert passed_options["evseId"] == 2
+        assert passed_options["idTag"] == "RFID-A"
+        assert passed_options["parentIdTag"] == "GROUP-X"
+        assert passed_options["expiryDate"] == "2025-01-15T13:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_make_reservation_blank_parent_and_expiry_use_defaults(self, ocpp_j_device):
+        ocpp_j_device.flow_reserve = AsyncMock(return_value=True)
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
+            mock_input.side_effect = ["10", "1", "X", "", ""]
+            await ocpp_j_device.interactive_reservation_make()
+
+        passed_options = ocpp_j_device.flow_reserve.await_args.args[0]
+        assert passed_options["parentIdTag"] is None
+        # Blank expiry → ISO timestamp (defaulted now+1h)
+        assert "T" in passed_options["expiryDate"]
+
+    @pytest.mark.asyncio
+    async def test_cancel_reservation_blank_uses_stored_id(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42)
+        ocpp_j_device.flow_reservation_cancel = AsyncMock(return_value=True)
+
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
+            mock_input.side_effect = [""]
+            await ocpp_j_device.interactive_reservation_cancel()
+
+        ocpp_j_device.flow_reservation_cancel.assert_awaited_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_cancel_reservation_uses_explicit_id(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42)
+        ocpp_j_device.flow_reservation_cancel = AsyncMock(return_value=True)
+
+        with patch("aioconsole.ainput", new_callable=AsyncMock) as mock_input, \
+             patch("charge_device_simulator.device.utility._is_tty", return_value=False):
+            mock_input.side_effect = ["999"]
+            await ocpp_j_device.interactive_reservation_cancel()
+
+        ocpp_j_device.flow_reservation_cancel.assert_awaited_once_with(999)
+
+
+class TestInboundReserveNowCancelReservation:
+    """Tests for the by_middleware_req routing of ReserveNow / CancelReservation.
+
+    The inbound handler schedules flow_reserve / flow_reservation_cancel via
+    asyncio.create_task with a delay. We replace those methods with plain
+    Mocks (not AsyncMock) and stub run_with_delay so no background coroutine
+    is created — keeping these tests focused on the response payload only."""
+
+    @pytest.mark.asyncio
+    async def test_reserve_now_accepted_when_idle(self, ocpp_j_device):
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+        ocpp_j_device.flow_reserve = MagicMock()
+
+        with patch("charge_device_simulator.device.utility.run_with_delay", return_value=None):
+            await ocpp_j_device.by_middleware_req("req1", "reservenow", {
+                "reservationId": 1, "connectorId": 1, "idTag": "X",
+                "expiryDate": "2025-01-15T13:00:00+00:00"
+            })
+
+        resp = ocpp_j_device.by_middleware_req_response_ready.await_args.args[1]
+        assert resp == {"status": "Accepted"}
+        ocpp_j_device.flow_reserve.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reserve_now_rejected_when_connector_id_missing(self, ocpp_j_device):
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+
+        await ocpp_j_device.by_middleware_req("req1", "reservenow", {
+            "reservationId": 1, "idTag": "X"  # connectorId missing — required in 1.6
+        })
+
+        resp = ocpp_j_device.by_middleware_req_response_ready.await_args.args[1]
+        assert resp == {"status": "Rejected"}
+
+    @pytest.mark.asyncio
+    async def test_reserve_now_occupied_when_already_reserved(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, connector_id=1)
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+
+        await ocpp_j_device.by_middleware_req("req1", "reservenow", {
+            "reservationId": 2, "connectorId": 1, "idTag": "Y"
+        })
+
+        resp = ocpp_j_device.by_middleware_req_response_ready.await_args.args[1]
+        assert resp == {"status": "Occupied"}
+
+    @pytest.mark.asyncio
+    async def test_cancel_reservation_accepted_when_id_matches(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42)
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+        ocpp_j_device.flow_reservation_cancel = MagicMock()
+
+        with patch("charge_device_simulator.device.utility.run_with_delay", return_value=None):
+            await ocpp_j_device.by_middleware_req("req1", "cancelreservation",
+                                                  {"reservationId": 42})
+
+        resp = ocpp_j_device.by_middleware_req_response_ready.await_args.args[1]
+        assert resp == {"status": "Accepted"}
+        ocpp_j_device.flow_reservation_cancel.assert_called_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_cancel_reservation_rejected_for_unknown_id(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=42)
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+
+        await ocpp_j_device.by_middleware_req("req1", "cancelreservation",
+                                              {"reservationId": 999})
+
+        resp = ocpp_j_device.by_middleware_req_response_ready.await_args.args[1]
+        assert resp == {"status": "Rejected"}

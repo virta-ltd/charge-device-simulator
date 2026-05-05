@@ -4,21 +4,34 @@ import datetime
 import logging
 import os
 import sys
+import typing
 
+from . import utility
 from .error_reasons import ErrorReasons
 
 
 class DeviceAbstract(abc.ABC):
     on_error = []
 
-    def __init__(self, device_id):
-        self.register_on_initialize = True
-        self.deviceId = device_id
-        self.name = ''
-        self.charge_in_progress = False
-        self.charge_id = -1
+    def __init__(self, device_id: str):
+        self.register_on_initialize: bool = True
+        self.deviceId: str = device_id
+        self.name: str = ''
+        self.charge_in_progress: bool = False
+        self.charge_id: typing.Any = -1
+        # Set True by Simulator.lifecycle_start when running an interactive
+        # session. Enables UX-only behaviors (e.g. refreshing per-cycle
+        # ephemeral options on each flow_charge); never affects non-interactive
+        # / frequent-flow runs.
+        self.interactive_mode: bool = False
+        self.reservation_id: typing.Optional[int] = None
+        self.reservation_connector_id: typing.Optional[int] = None
+        self.reservation_id_tag: typing.Optional[str] = None
+        self.reservation_parent_id_tag: typing.Optional[str] = None
+        self.reservation_expiry_date: typing.Optional[str] = None
+        self._last_authorize_info: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None
         envKey = 'RESPONSE_TIMEOUT_SECONDS'
-        self.response_timeout_seconds = int(os.environ[envKey]) if envKey in os.environ else 15
+        self.response_timeout_seconds: int = int(os.environ[envKey]) if envKey in os.environ else 15
 
     @property
     @abc.abstractmethod
@@ -40,7 +53,13 @@ class DeviceAbstract(abc.ABC):
     error_exit = True
 
     async def handle_error(self, desc, reason: ErrorReasons) -> bool:
-        self.logger.exception(desc)
+        # Only log a traceback when there's actually a live exception. Plain
+        # `logger.exception` would otherwise render "NoneType: None" for
+        # protocol-level rejections that don't originate in an except block.
+        if sys.exc_info()[0] is not None:
+            self.logger.exception(desc)
+        else:
+            self.logger.error(desc)
         for event in self.on_error:
             await event(desc, reason)
         if self.error_exit:
@@ -148,6 +167,174 @@ class DeviceAbstract(abc.ABC):
 
     def charge_can_stop(self, req_id):
         return self.charge_in_progress and self.charge_id == req_id
+
+    def reservation_is_active(self) -> bool:
+        return self.reservation_id is not None
+
+    def reserve_can_accept(self, connector_id: typing.Optional[int]) -> bool:
+        if self.charge_in_progress:
+            return False
+        if self.reservation_is_active() and self.reservation_connector_id == connector_id:
+            return False
+        return True
+
+    def reserve_can_cancel(self, reservation_id: typing.Optional[int]) -> bool:
+        return self.reservation_is_active() and self.reservation_id == reservation_id
+
+    def reservation_set(
+        self,
+        reservation_id: typing.Optional[int],
+        connector_id: typing.Optional[int],
+        id_tag: typing.Optional[str],
+        parent_id_tag: typing.Optional[str],
+        expiry_date: typing.Optional[str],
+    ) -> None:
+        self.reservation_id = reservation_id
+        self.reservation_connector_id = connector_id
+        self.reservation_id_tag = id_tag
+        self.reservation_parent_id_tag = parent_id_tag
+        self.reservation_expiry_date = expiry_date
+
+    def reservation_clear(self) -> None:
+        self.reservation_id = None
+        self.reservation_connector_id = None
+        self.reservation_id_tag = None
+        self.reservation_parent_id_tag = None
+        self.reservation_expiry_date = None
+
+    def _pre_charge_reservation_gate(self, options: typing.Dict[str, typing.Any]) -> bool:
+        """If the connector has an active reservation, validate the most recent
+        authorize info against it (direct idTag or parent/group match). On match,
+        injects reservationId into options so the start payload carries it."""
+        # Mirror action_charge_start's default — a missing connectorId would
+        # otherwise compare None against the stored connector and silently
+        # skip the gate (letting a non-matching tag through on a reserved
+        # connector).
+        connector_id = options.get("connectorId", 1)
+        if not self.reservation_is_active() or self.reservation_connector_id != connector_id:
+            return True
+        requested_id_tag = options.get("idTag")
+        if requested_id_tag is not None and requested_id_tag == self.reservation_id_tag:
+            options["reservationId"] = self.reservation_id
+            return True
+        last_parent = (self._last_authorize_info or {}).get("parent_id_tag")
+        if (last_parent is not None
+                and self.reservation_parent_id_tag is not None
+                and last_parent == self.reservation_parent_id_tag):
+            options["reservationId"] = self.reservation_id
+            return True
+        self.logger.info(
+            f"Reservation gate rejected charge: requested idTag/parent did not match reservation "
+            f"{self.reservation_id} on connector {connector_id}")
+        return False
+
+    def _reset_charge_cycle_options(self, options: typing.Dict[str, typing.Any]) -> None:
+        """In interactive mode only, drop per-cycle ephemeral keys so a re-run
+        of flow_charge picks up fresh start/stop timestamps and a recomputed
+        meterStop. Without this, a second Flow charge in the same interactive
+        session would replay the first cycle's `chargeStartTime` because the
+        dict is shared. Frequent-flow / non-interactive runs are intentionally
+        unaffected — they construct their own options each loop iteration."""
+        if not self.interactive_mode:
+            return
+        for key in ("chargeStartTime", "chargeStopTime", "meterStop"):
+            options.pop(key, None)
+
+    def _consume_reservation_if_used(self, options: typing.Dict[str, typing.Any]) -> None:
+        if "reservationId" in options and self.reservation_is_active() \
+                and options["reservationId"] == self.reservation_id:
+            self.logger.info(f"Reservation {self.reservation_id} consumed by charge start")
+            self.reservation_clear()
+
+    def _reserve_now_options_from_payload(
+        self, req_payload: typing.Dict[str, typing.Any],
+    ) -> typing.Dict[str, typing.Any]:
+        """Convert an inbound ReserveNow.req payload into the dict shape
+        flow_reserve expects. Default covers OCPP 1.6 / OCPP-S 1.5 SOAP.
+        Overridden for OCPP 2.0.1."""
+        return {
+            "reservationId": req_payload.get("reservationId"),
+            "connectorId": req_payload.get("connectorId"),
+            "idTag": req_payload.get("idTag"),
+            "parentIdTag": req_payload.get("parentIdTag"),
+            "expiryDate": req_payload.get("expiryDate"),
+        }
+
+    async def flow_reserve(self, options: typing.Dict[str, typing.Any]) -> bool:
+        """Apply a ReserveNow request: validate, store state, send Reserved
+        StatusNotification. Returns True if reservation was accepted."""
+        log_title = self.flow_reserve.__name__
+        self.logger.info(f"Flow {log_title} Start: connectorId={options.get('connectorId')}, "
+                         f"reservationId={options.get('reservationId')}")
+        connector_id: typing.Optional[int] = options.get("connectorId")
+        if not self.reserve_can_accept(connector_id):
+            self.logger.info(f"Flow {log_title} Rejected (connector busy or already reserved)")
+            return False
+        self.reservation_set(
+            reservation_id=options.get("reservationId"),
+            connector_id=connector_id,
+            id_tag=options.get("idTag"),
+            parent_id_tag=options.get("parentIdTag"),
+            expiry_date=options.get("expiryDate"),
+        )
+        if not await self.action_status_update("Reserved", options):
+            return False
+        self.logger.info(f"Flow {log_title} End")
+        return True
+
+    async def interactive_reservation_show(self) -> None:
+        """Print the device's current reservation state."""
+        self.logger.info(
+            f"Reservation state: id={self.reservation_id}, "
+            f"connectorId={self.reservation_connector_id}, "
+            f"idTag={self.reservation_id_tag}, "
+            f"parentIdTag={self.reservation_parent_id_tag}, "
+            f"expiryDate={self.reservation_expiry_date}")
+
+    async def interactive_reservation_make(self) -> None:
+        """Prompt for ReserveNow fields and run flow_reserve."""
+        reservation_id_input: str = await utility.prompt_text("reservationId (integer):")
+        connector_id_input: str = await utility.prompt_text("connectorId:")
+        id_tag_input: str = await utility.prompt_text("idTag:")
+        parent_id_tag_input: str = await utility.prompt_text("parentIdTag (blank to skip):")
+        expiry_date_input: str = await utility.prompt_text(
+            "expiryDate ISO (blank for now+1h):")
+        options: typing.Dict[str, typing.Any] = {
+            "reservationId": int(reservation_id_input) if reservation_id_input else None,
+            "connectorId": int(connector_id_input) if connector_id_input else None,
+            "evseId": int(connector_id_input) if connector_id_input else None,
+            "idTag": id_tag_input or None,
+            "parentIdTag": parent_id_tag_input or None,
+            "expiryDate": expiry_date_input or (
+                self.utcnow() + datetime.timedelta(hours=1)).isoformat(),
+        }
+        await self.flow_reserve(options)
+
+    async def interactive_reservation_cancel(self) -> None:
+        """Prompt for a reservationId (blank uses stored) and run flow_reservation_cancel."""
+        cancel_input: str = await utility.prompt_text(
+            "reservationId (blank uses stored):")
+        cancel_reservation_id: typing.Optional[int] = (
+            int(cancel_input) if cancel_input else self.reservation_id)
+        await self.flow_reservation_cancel(cancel_reservation_id)
+
+    async def flow_reservation_cancel(
+        self,
+        reservation_id: typing.Optional[int],
+        options: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> bool:
+        log_title = self.flow_reservation_cancel.__name__
+        self.logger.info(f"Flow {log_title} Start: reservationId={reservation_id}")
+        if not self.reserve_can_cancel(reservation_id):
+            self.logger.info(f"Flow {log_title} Rejected (no matching reservation)")
+            return False
+        notify_options: typing.Dict[str, typing.Any] = dict(options) if options else {}
+        notify_options.setdefault("connectorId", self.reservation_connector_id)
+        self.reservation_clear()
+        if not await self.action_status_update("Available", notify_options):
+            return False
+        self.logger.info(f"Flow {log_title} End")
+        return True
 
     @abc.abstractmethod
     def charge_meter_value_current(self, options: dict):

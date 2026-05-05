@@ -1,8 +1,10 @@
+import json
 import sys
+import typing
 
-import aioconsole
-
+from .. import utility
 from ..error_reasons import ErrorReasons
+from ..ocpp_enums import OCPP_16_CONNECTOR_STATUSES, OCPP_16_ERROR_CODES
 from .abstract_device_ocpp_j import AbstractDeviceOcppJ
 
 if sys.platform != "win32":
@@ -41,7 +43,9 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             json_payload['chargePointSerialNumber'] = self.spec_chargePointSerialNumber
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -73,8 +77,15 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         resp_json = await self.by_device_req_send(action, json_payload)
 
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
+        id_tag_info: typing.Dict[str, typing.Any] = resp_json[2][key_name]
+        self._last_authorize_info = {
+            "id_tag": id_tag,
+            "parent_id_tag": id_tag_info.get("parentIdTag"),
+        }
         self.logger.info(f"Action {action} End")
         return True
 
@@ -91,9 +102,13 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             "meterStart": options["meterStart"],
             "idTag": id_tag
         }
+        if "reservationId" in options:
+            json_payload["reservationId"] = options["reservationId"]
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
         self.charge_id = resp_json[2]['transactionId']
         self.charge_in_progress = True
@@ -139,33 +154,37 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
 
     async def loop_interactive_custom(self):
-        is_back = False
-        while not is_back:
-            input1 = await aioconsole.ainput("""
-What should I do? (enter the number + enter)
-0: Back
-1: HeartBeat
-2: StatusUpdate
-99: Full custom
-""")
-            if input1 == "0":
-                is_back = True
-            elif input1 == "1":
-                await self.action_heart_beat()
-            elif input1 == "2":
-                input1 = await aioconsole.ainput("Which status?\n")
-                input2 = await aioconsole.ainput("Which errorCode?\n")
-                input3 = await aioconsole.ainput("Which connector?\n")
-                await self.action_status_update_ocpp(input1, input2, {
-                    'connectorId': input3,
-                })
-            elif input1 == "99":
-                input1 = input("Enter full custom message:\n")
-                await self.by_device_req_send_raw(input1, "Custom")
-        pass
+        await utility.run_menu("What should I do?", [
+            utility.MenuEntry("Back", is_back=True, shortcut="0"),
+            utility.MenuEntry("HeartBeat", self.action_heart_beat, shortcut="1"),
+            utility.MenuEntry("StatusUpdate", self._interactive_status_update, shortcut="2"),
+            utility.MenuEntry("Show reservation state",
+                              self.interactive_reservation_show, shortcut="3"),
+            utility.MenuEntry("Make reservation (simulate ReserveNow)",
+                              self.interactive_reservation_make, shortcut="4"),
+            utility.MenuEntry("Cancel reservation (simulate CancelReservation)",
+                              self.interactive_reservation_cancel, shortcut="5"),
+            utility.MenuEntry("Full custom", self._interactive_full_custom, shortcut="s"),
+        ])
+
+    async def _interactive_status_update(self) -> None:
+        status: str = await utility.select_from_list(
+            "Which status?", OCPP_16_CONNECTOR_STATUSES)
+        error_code: str = await utility.select_from_list(
+            "Which errorCode?", OCPP_16_ERROR_CODES)
+        connector: str = await utility.prompt_text("Which connector?")
+        await self.action_status_update_ocpp(status, error_code, {
+            'connectorId': connector,
+        })
+
+    async def _interactive_full_custom(self) -> None:
+        message: str = await utility.prompt_text("Enter full custom message:")
+        await self.by_device_req_send_raw(message, "Custom")

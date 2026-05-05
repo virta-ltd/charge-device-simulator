@@ -2,8 +2,7 @@ import asyncio
 import logging
 import typing
 
-import aioconsole
-
+from . import utility
 from .error_reasons import ErrorReasons
 from ..model.error_message import ErrorMessage
 from .abstract import DeviceAbstract
@@ -108,6 +107,15 @@ class Simulator:
         pass
 
     async def lifecycle_start(self):
+        # Interactive sessions should drop back to the menu on a rejected
+        # response instead of sys.exit'ing the process, and need a few UX-only
+        # tweaks gated by `interactive_mode` (e.g. per-cycle option resets).
+        # Toggled here (rather than in initialize) so callers can flip
+        # is_interactive after initialize() completes; common pattern in
+        # play_ground.py.
+        if self.is_interactive:
+            self.device.error_exit = False
+            self.device.interactive_mode = True
         tasks = []
         if self.is_interactive:
             tasks.append(self.loop_interactive())
@@ -121,23 +129,31 @@ class Simulator:
         pass
 
     async def loop_interactive(self):
-        while not self.is_ended:
-            input1 = await aioconsole.ainput("""
-What should I do? (enter the number + enter)
-0: Exit
-1: Flow charge
-2: Flow heartbeat
-3: Flow authorize
-99: Single message
-""")
-            if input1 == "0":
-                return
-            elif input1 == "1":
-                await self.device.flow_charge(True, self.flow_charge_options)
-            elif input1 == "2":
-                await self.device.flow_heartbeat()
-            elif input1 == "3":
-                await self.device.flow_authorize(self.flow_charge_options)
-            elif input1 == "99":
-                await self.device.loop_interactive_custom()
-        pass
+        await utility.run_menu("What should I do?", [
+            utility.MenuEntry("Exit", is_back=True, shortcut="0"),
+            utility.MenuEntry("Flow charge", self._interactive_flow_charge, shortcut="1"),
+            utility.MenuEntry("Flow heartbeat", self.device.flow_heartbeat, shortcut="2"),
+            utility.MenuEntry("Flow authorize", self._interactive_flow_authorize, shortcut="3"),
+            utility.MenuEntry("Single message", self.device.loop_interactive_custom, shortcut="s"),
+        ])
+
+    async def _interactive_flow_charge(self) -> None:
+        options = await self._prompt_options_with_id_tag()
+        await self.device.flow_charge(True, options)
+
+    async def _interactive_flow_authorize(self) -> None:
+        options = await self._prompt_options_with_id_tag()
+        await self.device.flow_authorize(options)
+
+    async def _prompt_options_with_id_tag(self) -> typing.Dict[str, typing.Any]:
+        """Prompt for an idTag, defaulting to the configured one. Returns the
+        stored options dict unchanged when the operator keeps the default
+        (preserves identity for any subsequent state mutation by actions); a
+        shallow copy with the override otherwise."""
+        default_id_tag: str = self.flow_charge_options.get("idTag", "")
+        chosen: str = await utility.prompt_text("idTag", default=default_id_tag)
+        if chosen == default_id_tag:
+            return self.flow_charge_options
+        options: typing.Dict[str, typing.Any] = dict(self.flow_charge_options)
+        options["idTag"] = chosen
+        return options
