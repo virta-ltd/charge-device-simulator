@@ -206,7 +206,11 @@ class DeviceAbstract(abc.ABC):
         """If the connector has an active reservation, validate the most recent
         authorize info against it (direct idTag or parent/group match). On match,
         injects reservationId into options so the start payload carries it."""
-        connector_id = options.get("connectorId")
+        # Mirror action_charge_start's default — a missing connectorId would
+        # otherwise compare None against the stored connector and silently
+        # skip the gate (letting a non-matching tag through on a reserved
+        # connector).
+        connector_id = options.get("connectorId", 1)
         if not self.reservation_is_active() or self.reservation_connector_id != connector_id:
             return True
         requested_id_tag = options.get("idTag")

@@ -355,6 +355,18 @@ class TestPreChargeReservationGate:
 
         assert ocpp_j_device._pre_charge_reservation_gate(options) is False
 
+    def test_missing_connector_id_still_applies_gate_to_default_connector(self, ocpp_j_device):
+        # Reservation is on connector 1; user's options omit connectorId.
+        # Without the get-with-default, the gate would compare None vs 1 and
+        # silently let the charge through.
+        _seed_reservation(ocpp_j_device, reservation_id=15, connector_id=1,
+                          id_tag="OWNER", parent_id_tag="GROUP-X")
+        ocpp_j_device._last_authorize_info = {"id_tag": "INTRUDER", "parent_id_tag": "GROUP-Y"}
+        options = {"idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+        assert "reservationId" not in options
+
 
 class TestConsumeReservationIfUsed:
     def test_clears_when_reservation_id_in_options_matches(self, ocpp_j_device):
