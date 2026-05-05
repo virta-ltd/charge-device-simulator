@@ -376,6 +376,44 @@ class TestConsumeReservationIfUsed:
         assert ocpp_j_device.reservation_id == 99
 
 
+class TestResetChargeCycleOptions:
+    """A second `flow_charge` invocation in an interactive session must not
+    replay the previous cycle's start/stop time or computed meterStop. The
+    same reset must NOT happen in non-interactive (frequent-flow) runs to
+    preserve historical behavior."""
+
+    def _stale_options(self):
+        return {
+            "idTag": "ABC",
+            "connectorId": 1,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "chargeStopTime": "2025-01-15T12:30:00+00:00",
+            "meterStop": 31000,
+            "meterStart": 1000,
+        }
+
+    def test_drops_stale_charge_cycle_keys_when_interactive(self, ocpp_j_device):
+        ocpp_j_device.interactive_mode = True
+        options = self._stale_options()
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert "chargeStartTime" not in options
+        assert "chargeStopTime" not in options
+        assert "meterStop" not in options
+        # Caller-supplied config (idTag, connectorId, meterStart) is untouched
+        assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
+
+    def test_keeps_options_when_not_interactive(self, ocpp_j_device):
+        # Default (interactive_mode=False) — frequent-flow / non-interactive run
+        options = self._stale_options()
+        snapshot = dict(options)
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options == snapshot
+
+
 class TestInteractiveReservationHandlers:
     @pytest.mark.asyncio
     async def test_show_state_does_not_invoke_flows(self, ocpp_j_device):

@@ -19,6 +19,11 @@ class DeviceAbstract(abc.ABC):
         self.name: str = ''
         self.charge_in_progress: bool = False
         self.charge_id: typing.Any = -1
+        # Set True by Simulator.lifecycle_start when running an interactive
+        # session. Enables UX-only behaviors (e.g. refreshing per-cycle
+        # ephemeral options on each flow_charge); never affects non-interactive
+        # / frequent-flow runs.
+        self.interactive_mode: bool = False
         self.reservation_id: typing.Optional[int] = None
         self.reservation_connector_id: typing.Optional[int] = None
         self.reservation_id_tag: typing.Optional[str] = None
@@ -218,6 +223,18 @@ class DeviceAbstract(abc.ABC):
             f"Reservation gate rejected charge: requested idTag/parent did not match reservation "
             f"{self.reservation_id} on connector {connector_id}")
         return False
+
+    def _reset_charge_cycle_options(self, options: typing.Dict[str, typing.Any]) -> None:
+        """In interactive mode only, drop per-cycle ephemeral keys so a re-run
+        of flow_charge picks up fresh start/stop timestamps and a recomputed
+        meterStop. Without this, a second Flow charge in the same interactive
+        session would replay the first cycle's `chargeStartTime` because the
+        dict is shared. Frequent-flow / non-interactive runs are intentionally
+        unaffected — they construct their own options each loop iteration."""
+        if not self.interactive_mode:
+            return
+        for key in ("chargeStartTime", "chargeStopTime", "meterStop"):
+            options.pop(key, None)
 
     def _consume_reservation_if_used(self, options: typing.Dict[str, typing.Any]) -> None:
         if "reservationId" in options and self.reservation_is_active() \
