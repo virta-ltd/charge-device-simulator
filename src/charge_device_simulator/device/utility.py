@@ -5,6 +5,7 @@ import typing
 
 import aioconsole
 import questionary
+from prompt_toolkit.patch_stdout import patch_stdout
 
 
 async def run_with_delay(to_run, delay_seconds):
@@ -114,12 +115,15 @@ async def _select_tty(
     # `use_shortcuts=True` is required for shortcuts to render and bind at all.
     # Questionary leaves explicit `shortcut_key` values alone and only
     # auto-assigns 1..9 to choices that don't have one.
-    result: typing.Optional[str] = await questionary.select(
-        prompt,
-        choices=full_choices,
-        default=default if default in choices else None,
-        use_shortcuts=True,
-    ).ask_async()
+    # `patch_stdout` keeps background log output above the prompt so the menu
+    # re-renders cleanly underneath instead of scrolling off-screen.
+    with patch_stdout(raw=True):
+        result: typing.Optional[str] = await questionary.select(
+            prompt,
+            choices=full_choices,
+            default=default if default in choices else None,
+            use_shortcuts=True,
+        ).ask_async()
     if result is None:
         # User aborted (Ctrl-C); re-raise as cancellation.
         raise asyncio.CancelledError()
@@ -140,10 +144,11 @@ async def prompt_text(prompt: str, *, default: typing.Optional[str] = None) -> s
     """
     if _is_tty():
         try:
-            result: typing.Optional[str] = await questionary.text(
-                prompt,
-                default=default or "",
-            ).ask_async()
+            with patch_stdout(raw=True):
+                result: typing.Optional[str] = await questionary.text(
+                    prompt,
+                    default=default or "",
+                ).ask_async()
             if result is None:
                 raise asyncio.CancelledError()
             return result
