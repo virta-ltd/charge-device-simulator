@@ -1,3 +1,4 @@
+import json
 import sys
 import typing
 
@@ -42,7 +43,9 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             json_payload['chargePointSerialNumber'] = self.spec_chargePointSerialNumber
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or resp_json[2]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -74,7 +77,9 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         resp_json = await self.by_device_req_send(action, json_payload)
 
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
         id_tag_info: typing.Dict[str, typing.Any] = resp_json[2][key_name]
         self._last_authorize_info = {
@@ -101,7 +106,9 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             json_payload["reservationId"] = options["reservationId"]
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
         self.charge_id = resp_json[2]['transactionId']
         self.charge_in_progress = True
@@ -147,7 +154,9 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
+                ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True

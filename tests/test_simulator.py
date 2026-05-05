@@ -143,6 +143,36 @@ class TestSimulatorRfidSwipe:
         assert passed_options is not simulator.flow_charge_options
 
 
+class TestErrorExitInteractiveBehavior:
+    """When the operator runs in interactive mode, a CSMS-rejected response
+    should drop them back to the menu rather than sys.exit'ing the process."""
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_start_disables_error_exit_when_interactive(
+            self, simulator, mock_device):
+        mock_device.error_exit = True
+        simulator.is_interactive = True
+        simulator.frequent_flow_enabled = False
+        # Stub the interactive loop so lifecycle_start returns immediately
+        with patch.object(simulator, "loop_interactive", new_callable=AsyncMock):
+            await simulator.lifecycle_start()
+
+        assert mock_device.error_exit is False
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_start_keeps_error_exit_when_not_interactive(
+            self, simulator, mock_device):
+        mock_device.error_exit = True
+        simulator.is_interactive = False
+        simulator.frequent_flow_enabled = False
+
+        await simulator.lifecycle_start()
+
+        # error_exit must remain True so frequent-flow / non-interactive runs
+        # still crash on rejected responses (the existing fail-fast behavior).
+        assert mock_device.error_exit is True
+
+
 class TestSimulatorErrorHandling:
     """Tests for simulator error handling."""
 

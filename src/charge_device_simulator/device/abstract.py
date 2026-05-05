@@ -48,7 +48,13 @@ class DeviceAbstract(abc.ABC):
     error_exit = True
 
     async def handle_error(self, desc, reason: ErrorReasons) -> bool:
-        self.logger.exception(desc)
+        # Only log a traceback when there's actually a live exception. Plain
+        # `logger.exception` would otherwise render "NoneType: None" for
+        # protocol-level rejections that don't originate in an except block.
+        if sys.exc_info()[0] is not None:
+            self.logger.exception(desc)
+        else:
+            self.logger.error(desc)
         for event in self.on_error:
             await event(desc, reason)
         if self.error_exit:

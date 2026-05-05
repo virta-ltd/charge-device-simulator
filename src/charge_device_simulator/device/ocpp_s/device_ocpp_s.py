@@ -120,7 +120,9 @@ class DeviceOcppS(DeviceAbstract):
             req_payload['chargePointSerialNumber'] = self.spec_chargePointSerialNumber
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{resp_payload!r}",
+                ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
@@ -160,7 +162,9 @@ class DeviceOcppS(DeviceAbstract):
         }
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{resp_payload!r}",
+                ErrorReasons.InvalidResponse)
             return False
         # Per the OCPP 1.5/1.6 SOAP schema, parentIdTag lives inside idTagInfo.
         # Fall back to the top level for tolerance with non-standard responses.
@@ -219,7 +223,9 @@ class DeviceOcppS(DeviceAbstract):
             req_payload["reservationId"] = options["reservationId"]
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['idTagInfo']['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{resp_payload!r}",
+                ErrorReasons.InvalidResponse)
             return False
         self.charge_id = resp_payload['transactionId']
         self.charge_in_progress = True
@@ -270,7 +276,9 @@ class DeviceOcppS(DeviceAbstract):
         }
         resp_payload = await self.by_device_req_send(action, req_payload)
         if resp_payload is None or resp_payload['status'] != 'Accepted':
-            await self.handle_error(f"Action {action} Response Failed", ErrorReasons.InvalidResponse)
+            await self.handle_error(
+                f"Action {action} Response Failed:\n{resp_payload!r}",
+                ErrorReasons.InvalidResponse)
             return False
         self.logger.info(f"Action {action} End")
         return True
