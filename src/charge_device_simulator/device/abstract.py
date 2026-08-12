@@ -255,11 +255,14 @@ class DeviceAbstract(abc.ABC):
         is configured: its readings are absolute and replay identically each
         cycle, so carrying the stop forward would put meterStart above the
         replayed samples (a register rewind); the configured meterStart is
-        kept instead."""
+        kept instead. reservationId is always dropped: the reservation gate
+        injects it per cycle, and replaying it would attach an
+        already-consumed reservation to the next StartTransaction."""
         if "meterStop" in options and self._scripted_final_meter_value(options) is None:
             options["meterStart"] = options["meterStop"]
         for key in ("chargeStartTime", "chargeStopTime", "meterStop"):
             options.pop(key, None)
+        options.pop("reservationId", None)
 
     def _consume_reservation_if_used(self, options: typing.Dict[str, typing.Any]) -> None:
         if "reservationId" in options and self.reservation_is_active() \

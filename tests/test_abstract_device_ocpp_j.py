@@ -459,6 +459,16 @@ class TestResetChargeCycleOptions:
 
         assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
 
+    def test_drops_gate_injected_reservation_id(self, ocpp_j_device):
+        """reservationId is per-cycle state injected by the reservation gate;
+        replaying it would attach an already-consumed reservation to the next
+        StartTransaction."""
+        options = {"idTag": "ABC", "reservationId": 7}
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert "reservationId" not in options
+
     def test_scripted_meter_values_keep_configured_meter_start(self, ocpp_j_device):
         """Scripted registers are absolute and replay identically each cycle;
         carrying the previous stop into meterStart would put it above the
