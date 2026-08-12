@@ -124,8 +124,10 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             "transactionId": self.charge_id,
             "meterValue": [{
                 "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
+                # OCPP 1.6J types sampledValue.value as a string; sending a
+                # bare number makes schema-validating backends drop the sample.
                 "sampledValue": [{
-                    "value": meter_value if meter_value else self.charge_meter_value_current(options),
+                    "value": str(meter_value if meter_value else self.charge_meter_value_current(options)),
                     "context": "Sample.Periodic",
                     "measurand": "Energy.Active.Import.Register",
                     "location": "Outlet",
@@ -150,7 +152,20 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             "transactionId": self.charge_id,
             "meterStop": options["meterStop"],
             "idTag": id_tag,
-            "reason": options.get("stopReason", "Local")
+            "reason": options.get("stopReason", "Local"),
+            # Backends build the CDR from the closing register reading; without
+            # a Transaction.End sample some cannot price the session and leave
+            # it closed-but-unbilled.
+            "transactionData": [{
+                "timestamp": options["chargeStopTime"],
+                "sampledValue": [{
+                    "value": str(options["meterStop"]),
+                    "context": "Transaction.End",
+                    "measurand": "Energy.Active.Import.Register",
+                    "location": "Outlet",
+                    "unit": "Wh"
+                }]
+            }]
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':

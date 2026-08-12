@@ -129,6 +129,67 @@ class TestJ16FlowChargeReservationGate:
         assert device_ocpp_j16.reservation_is_active()
 
 
+class TestJ16MeterValuesPayload:
+    @pytest.mark.asyncio
+    async def test_sampled_value_is_a_string(self, device_ocpp_j16):
+        """OCPP 1.6J types sampledValue.value as a string."""
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return [3, "req-1", {}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        await device_ocpp_j16.action_meter_value({"connectorId": 1}, meter_value=2500)
+
+        sampled = captured["MeterValues"]["meterValue"][0]["sampledValue"][0]
+        assert sampled["value"] == "2500"
+
+
+class TestJ16StopTransactionPayload:
+    async def _capture_stop(self, device, options):
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device.by_device_req_send = AsyncMock(side_effect=fake_send)
+        await device.action_charge_stop(options)
+        return captured["StopTransaction"]
+
+    @pytest.mark.asyncio
+    async def test_includes_transaction_end_sample(self, device_ocpp_j16):
+        """Backends build the CDR from the closing register reading."""
+        payload = await self._capture_stop(device_ocpp_j16, {
+            "connectorId": 1,
+            "idTag": "X",
+            "meterStart": 1000,
+            "meterStop": 3500,
+            "chargeStopTime": "2025-01-15T12:30:00+00:00",
+        })
+
+        sampled = payload["transactionData"][0]["sampledValue"][0]
+        assert sampled["value"] == "3500"
+        assert sampled["context"] == "Transaction.End"
+        assert sampled["measurand"] == "Energy.Active.Import.Register"
+        assert payload["transactionData"][0]["timestamp"] == payload["timestamp"]
+
+    @pytest.mark.asyncio
+    async def test_meter_stop_matches_transaction_data(self, device_ocpp_j16):
+        """A mismatch between the two is what makes a session unbillable."""
+        payload = await self._capture_stop(device_ocpp_j16, {
+            "connectorId": 1,
+            "idTag": "X",
+            "meterStart": 1000,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+        })
+
+        assert str(payload["meterStop"]) == \
+            payload["transactionData"][0]["sampledValue"][0]["value"]
+
+
 class TestJ16ChargeCycleIsolation:
     """The regression behind Virta sessions staying CLOSED: consecutive
     frequent-flow charges shared one options dict, so every cycle after the
@@ -169,6 +230,29 @@ class TestJ16ChargeCycleIsolation:
         # register never rewinds
         assert second_start["meterStart"] == first_stop["meterStop"]
         assert second_stop["meterStop"] >= second_start["meterStart"]
+
+    @pytest.mark.asyncio
+    async def test_preparing_precedes_start_transaction(self, device_ocpp_j16, no_sleep):
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload.get("status")))
+            if action == "StartTransaction":
+                return _stub_start_transaction_response()
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        await device_ocpp_j16.flow_charge(True, {
+            "connectorId": 1, "idTag": "X",
+            "autoActionsLoopDelayInSeconds": 0, "autoActionsLoopCount": 1,
+        })
+
+        actions = [a for a, _ in sent]
+        statuses = [s for a, s in sent if a == "StatusNotification"]
+        assert actions.index("StartTransaction") > \
+            next(i for i, (a, s) in enumerate(sent) if s == "Preparing")
+        assert statuses[:2] == ["Preparing", "Charging"]
 
 
 class TestJ16FlowReserveStatusPayload:

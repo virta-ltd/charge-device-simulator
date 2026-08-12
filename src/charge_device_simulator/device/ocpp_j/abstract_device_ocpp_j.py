@@ -107,7 +107,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         pass
 
     async def action_heart_beat(self) -> bool:
-        action = "HeartBeat"
+        action = "Heartbeat"
         self.logger.info(f"Action {action} Start")
         if await self.by_device_req_send(action, {}) is None:
             return False
@@ -170,13 +170,16 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not self._pre_charge_reservation_gate(options):
             self.charge_in_progress = False
             return False
+        # Preparing precedes StartTransaction: the connector reaches that state
+        # when the cable is plugged and the tag accepted, before the
+        # transaction exists.
+        if not await self.action_status_update("Preparing", options):
+            self.charge_in_progress = False
+            return False
         if not await self.action_charge_start(options):
             self.charge_in_progress = False
             return False
         self._consume_reservation_if_used(options)
-        if not await self.action_status_update("Preparing", options):
-            self.charge_in_progress = False
-            return False
         if not await self.action_status_update("Charging", options):
             self.charge_in_progress = False
             return False
@@ -344,7 +347,9 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 resp_payload["status"] = "Rejected"
             else:
                 options = {
-                    "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
+                    # connectorId 0 addresses the charge point as a whole and
+                    # is not a valid transaction target; fall back to 1.
+                    "connectorId": req_payload.get("connectorId") or 1,
                     "idTag": req_payload["idTag"] if "idTag" in req_payload else "-",
                 }
                 self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")
