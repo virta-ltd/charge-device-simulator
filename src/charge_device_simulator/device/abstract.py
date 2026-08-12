@@ -177,7 +177,12 @@ class DeviceAbstract(abc.ABC):
     def reserve_can_accept(self, connector_id: typing.Optional[int]) -> bool:
         if self.charge_in_progress:
             return False
-        if self.reservation_is_active() and self.reservation_connector_id == connector_id:
+        # The device stores a single reservation, so accepting another while
+        # one is active — same connector, a different one, or connector 0,
+        # which reserves the charge point as a whole — would silently
+        # overwrite the stored record and drop the protection the first
+        # Accepted promised.
+        if self.reservation_is_active():
             return False
         return True
 

@@ -271,6 +271,39 @@ class TestFlowReserve:
         assert ocpp_j_device.reservation_id == 1
         ocpp_j_device.action_status_update.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_rejected_when_charge_point_reserved_via_connector_zero(self, ocpp_j_device):
+        """A connector-0 reservation covers the charge point as a whole; a
+        later ReserveNow for a specific connector must not silently overwrite
+        it and strip the reserved tag's protection."""
+        _seed_reservation(ocpp_j_device, reservation_id=1, connector_id=0)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reserve({
+            "reservationId": 99, "connectorId": 1, "idTag": "OTHER"
+        })
+
+        assert result is False
+        assert ocpp_j_device.reservation_id == 1
+        assert ocpp_j_device.reservation_connector_id == 0
+        ocpp_j_device.action_status_update.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rejected_on_other_connector_while_a_reservation_is_active(self, ocpp_j_device):
+        """The device stores a single reservation; accepting one for a
+        different connector would silently drop the stored record."""
+        _seed_reservation(ocpp_j_device, reservation_id=1, connector_id=1)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reserve({
+            "reservationId": 99, "connectorId": 2, "idTag": "OTHER"
+        })
+
+        assert result is False
+        assert ocpp_j_device.reservation_id == 1
+        assert ocpp_j_device.reservation_connector_id == 1
+        ocpp_j_device.action_status_update.assert_not_awaited()
+
 
 class TestFlowReservationCancel:
     @pytest.mark.asyncio
