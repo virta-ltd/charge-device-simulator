@@ -172,11 +172,21 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             }]
         }
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
+        if resp_json is None or len(resp_json) != 3 or not isinstance(resp_json[2], dict):
             await self.handle_error(
                 f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
                 ErrorReasons.InvalidResponse)
             return False
+        # idTagInfo is optional in StopTransaction.conf, and its status is
+        # authorization info about the idTag (e.g. Blocked for future use) —
+        # not whether the stop was registered. The CSMS closes the transaction
+        # the moment it answers the CALL, so any valid CALLRESULT is a
+        # successful stop; treating `[3, id, {}]` as failure crashed the flow
+        # and skipped the closing Available status.
+        id_tag_info = resp_json[2].get(key_name)
+        if id_tag_info is not None and id_tag_info.get('status') != 'Accepted':
+            self.logger.warning(
+                f"Action {action} idTagInfo status not Accepted (transaction still stopped):\n{json.dumps(id_tag_info)}")
         self.charge_id = -1
         self.logger.info(f"Action {action} End")
         return True

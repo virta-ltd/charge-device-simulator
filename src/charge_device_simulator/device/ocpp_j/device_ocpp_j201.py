@@ -239,11 +239,19 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
             }
         }
         resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
+        if resp_json is None or len(resp_json) != 3 or not isinstance(resp_json[2], dict):
             await self.handle_error(
                 f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
                 ErrorReasons.InvalidResponse)
             return False
+        # idTokenInfo is optional in TransactionEventResponse and concerns the
+        # token, not whether the Ended event was registered — an empty payload
+        # is the common success response. Any valid CALLRESULT closes the
+        # transaction.
+        id_token_info = resp_json[2].get(key_name)
+        if id_token_info is not None and id_token_info.get('status') != 'Accepted':
+            self.logger.warning(
+                f"Action {action} idTokenInfo status not Accepted (transaction still ended):\n{json.dumps(id_token_info)}")
         self.logger.info(f"Action {action} End")
         return True
 

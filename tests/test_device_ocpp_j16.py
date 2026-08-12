@@ -265,6 +265,59 @@ class TestJ16StopTransactionPayload:
             payload["transactionData"][0]["sampledValue"][0]["value"]
 
 
+class TestJ16StopTransactionConfHandling:
+    """idTagInfo is optional in StopTransaction.conf and concerns the idTag's
+    future authorization, not whether the stop was registered. An empty conf
+    `[3, id, {}]` is valid and used to raise KeyError, crashing the flow and
+    skipping the closing Available status."""
+
+    def _options(self):
+        return {"connectorId": 1, "idTag": "X", "meterStart": 1000,
+                "meterStop": 2000, "chargeStopTime": "2025-01-15T12:30:00+00:00"}
+
+    @pytest.mark.asyncio
+    async def test_empty_conf_is_a_successful_stop(self, device_ocpp_j16):
+        device_ocpp_j16.charge_id = 555
+        device_ocpp_j16.by_device_req_send = AsyncMock(return_value=[3, "r", {}])
+
+        ok = await device_ocpp_j16.action_charge_stop(self._options())
+
+        assert ok is True
+        assert device_ocpp_j16.charge_id == -1
+
+    @pytest.mark.asyncio
+    async def test_non_accepted_id_tag_info_still_stops(self, device_ocpp_j16):
+        """A Blocked/Invalid verdict is about the tag, not the stop."""
+        device_ocpp_j16.charge_id = 555
+        device_ocpp_j16.by_device_req_send = AsyncMock(
+            return_value=[3, "r", {"idTagInfo": {"status": "Blocked"}}])
+
+        ok = await device_ocpp_j16.action_charge_stop(self._options())
+
+        assert ok is True
+        assert device_ocpp_j16.charge_id == -1
+
+    @pytest.mark.asyncio
+    async def test_timeout_or_call_error_still_fails(self, device_ocpp_j16):
+        device_ocpp_j16.error_exit = False
+        device_ocpp_j16.charge_id = 555
+        device_ocpp_j16.by_device_req_send = AsyncMock(return_value=None)
+
+        ok = await device_ocpp_j16.action_charge_stop(self._options())
+
+        assert ok is False
+        assert device_ocpp_j16.charge_id == 555
+
+    @pytest.mark.asyncio
+    async def test_malformed_conf_still_fails(self, device_ocpp_j16):
+        device_ocpp_j16.error_exit = False
+        device_ocpp_j16.by_device_req_send = AsyncMock(return_value=[3, "r"])
+
+        ok = await device_ocpp_j16.action_charge_stop(self._options())
+
+        assert ok is False
+
+
 class TestJ16ChargeCycleIsolation:
     """The regression behind Virta sessions staying CLOSED: consecutive
     frequent-flow charges shared one options dict, so every cycle after the
