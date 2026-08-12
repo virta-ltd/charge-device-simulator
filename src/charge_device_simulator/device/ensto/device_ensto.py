@@ -184,7 +184,7 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
             "out": options.get("connectorId", 1),
             "time": self.utcnow().timestamp() if time_stamp is None else time_stamp,
             "t": 382,
-            "eem": (meter_value if meter_value else self.charge_meter_value_current(options)) - options["meterStart"],
+            "eem": (meter_value if meter_value is not None else self.charge_meter_value_current(options)) - options["meterStart"],
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:

@@ -127,7 +127,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
                 # OCPP 1.6J types sampledValue.value as a string; sending a
                 # bare number makes schema-validating backends drop the sample.
                 "sampledValue": [{
-                    "value": str(meter_value if meter_value else self.charge_meter_value_current(options)),
+                    "value": str(meter_value if meter_value is not None else self.charge_meter_value_current(options)),
                     "context": "Sample.Periodic",
                     "measurand": "Energy.Active.Import.Register",
                     "location": "Outlet",

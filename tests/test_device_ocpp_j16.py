@@ -146,6 +146,24 @@ class TestJ16MeterValuesPayload:
         sampled = captured["MeterValues"]["meterValue"][0]["sampledValue"][0]
         assert sampled["value"] == "2500"
 
+    @pytest.mark.asyncio
+    async def test_explicit_zero_reading_is_sent_as_zero(self, device_ocpp_j16):
+        """0 is a legitimate register reading (fresh/reset meter); a falsy
+        check replaced it with a computed value, fabricating data that
+        contradicts the operator's script."""
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return [3, "req-1", {}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        await device_ocpp_j16.action_meter_value({"connectorId": 1}, meter_value=0)
+
+        sampled = captured["MeterValues"]["meterValue"][0]["sampledValue"][0]
+        assert sampled["value"] == "0"
+
 
 class TestJ16StopTransactionPayload:
     async def _capture_stop(self, device, options):

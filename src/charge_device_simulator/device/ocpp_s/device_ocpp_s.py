@@ -250,7 +250,7 @@ class DeviceOcppS(DeviceAbstract):
             "transactionId": self.charge_id,
             "values": [{
                 "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
-                "value": [meter_value if meter_value else self.charge_meter_value_current(options), {
+                "value": [meter_value if meter_value is not None else self.charge_meter_value_current(options), {
                     "context": "Sample.Periodic",
                     "measurand": "Energy.Active.Import.Register",
                     "location": "Outlet",
