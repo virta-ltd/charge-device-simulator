@@ -164,6 +164,63 @@ class TestJ16MeterValuesPayload:
         sampled = captured["MeterValues"]["meterValue"][0]["sampledValue"][0]
         assert sampled["value"] == "0"
 
+    @pytest.mark.asyncio
+    async def test_idle_meter_values_omits_transaction_id(self, device_ocpp_j16):
+        """TriggerMessage(MeterValues) while no transaction is open must not
+        send the placeholder transactionId -1."""
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return [3, "req-1", {}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        await device_ocpp_j16.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert "transactionId" not in captured["MeterValues"]
+
+    @pytest.mark.asyncio
+    async def test_meter_values_during_transaction_include_transaction_id(self, device_ocpp_j16):
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return [3, "req-1", {}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+        device_ocpp_j16.charge_id = 555
+
+        await device_ocpp_j16.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert captured["MeterValues"]["transactionId"] == 555
+
+    @pytest.mark.asyncio
+    async def test_no_stale_transaction_id_after_completed_session(self, device_ocpp_j16, no_sleep):
+        """A completed charge must not leave its id attached to later idle
+        meter values."""
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload))
+            if action == "StartTransaction":
+                return _stub_start_transaction_response()
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        assert await device_ocpp_j16.flow_charge(True, {
+            "connectorId": 1, "idTag": "X",
+            "autoActionsLoopDelayInSeconds": 0, "autoActionsLoopCount": 1,
+        }) is True
+        in_charge = [p for a, p in sent if a == "MeterValues"]
+        assert all(p["transactionId"] == 555 for p in in_charge)
+
+        sent.clear()
+        await device_ocpp_j16.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert "transactionId" not in sent[0][1]
+
 
 class TestJ16StopTransactionPayload:
     async def _capture_stop(self, device, options):

@@ -121,7 +121,6 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         conenctor_id = options.get("connectorId", 1)
         json_payload = {
             "connectorId": conenctor_id,
-            "transactionId": self.charge_id,
             "meterValue": [{
                 "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
                 # OCPP 1.6J types sampledValue.value as a string; sending a
@@ -135,6 +134,11 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
                 }]
             }]
         }
+        # transactionId is optional and only meaningful while a transaction is
+        # open; outside one charge_id holds -1 or the previous session's id,
+        # which schema-strict backends reject or misattribute.
+        if self.charge_id != -1:
+            json_payload["transactionId"] = self.charge_id
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None:
             return False
@@ -173,6 +177,7 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
                 f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
                 ErrorReasons.InvalidResponse)
             return False
+        self.charge_id = -1
         self.logger.info(f"Action {action} End")
         return True
 
