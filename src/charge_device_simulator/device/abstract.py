@@ -242,26 +242,44 @@ class DeviceAbstract(abc.ABC):
                 return last["meterValue"]
         return None
 
+    # Recorded inside the options dict itself so the record travels with the
+    # dict shared across cycles. Payload builders read specific keys only, so
+    # the extra entry never reaches the wire.
+    _PINNED_CHARGE_CYCLE_KEYS = "_pinnedChargeCycleKeys"
+    _CHARGE_CYCLE_EPHEMERAL_KEYS = ("chargeStartTime", "chargeStopTime", "meterStop", "meterStart")
+
     def _reset_charge_cycle_options(self, options: typing.Dict[str, typing.Any]) -> None:
-        """Drop per-cycle ephemeral keys so every flow_charge run picks up
-        fresh start/stop timestamps and a recomputed meterStop. The options
-        dict is shared across runs (frequent flows pass the configured dict by
-        reference), so without this every cycle after the first replays the
-        first cycle's chargeStartTime/chargeStopTime/meterStop — producing
+        """Drop the previous cycle's auto-filled values so every flow_charge
+        run picks up fresh start/stop timestamps and a recomputed meterStop,
+        while preserving values the operator configured. The options dict is
+        shared across runs (frequent flows pass the configured dict by
+        reference), so without the reset every cycle after the first replays
+        the first cycle's chargeStartTime/chargeStopTime/meterStop — producing
         overlapping transactions whose meterStop contradicts the periodic
-        meter values, which billing backends reject. The previous cycle's
-        meterStop is carried into meterStart so the energy register stays
-        monotonic like a real meter — except when a scripted meterValues list
-        is configured: its readings are absolute and replay identically each
-        cycle, so carrying the stop forward would put meterStart above the
-        replayed samples (a register rewind); the configured meterStart is
-        kept instead. reservationId is always dropped: the reservation gate
-        injects it per cycle, and replaying it would attach an
-        already-consumed reservation to the next StartTransaction."""
-        if "meterStop" in options and self._scripted_final_meter_value(options) is None:
+        meter values, which billing backends reject. But the operator may pin
+        any of those keys (plus meterStart) up front to replay a deterministic
+        session: the first call records which ephemeral keys are already
+        present, and every call drops only the unpinned ones. The previous
+        cycle's meterStop is carried into meterStart so the energy register
+        stays monotonic like a real meter — skipped when either meter key is
+        pinned (the configured session shape wins) or a scripted meterValues
+        list is configured: its readings are absolute and replay identically
+        each cycle, so carrying the stop forward would put meterStart above
+        the replayed samples (a register rewind). reservationId is always
+        dropped: the reservation gate injects it per cycle, and replaying it
+        would attach an already-consumed reservation to the next
+        StartTransaction."""
+        pinned = options.get(self._PINNED_CHARGE_CYCLE_KEYS)
+        if pinned is None:
+            pinned = tuple(key for key in self._CHARGE_CYCLE_EPHEMERAL_KEYS if key in options)
+            options[self._PINNED_CHARGE_CYCLE_KEYS] = pinned
+        if ("meterStop" in options
+                and "meterStop" not in pinned and "meterStart" not in pinned
+                and self._scripted_final_meter_value(options) is None):
             options["meterStart"] = options["meterStop"]
         for key in ("chargeStartTime", "chargeStopTime", "meterStop"):
-            options.pop(key, None)
+            if key not in pinned:
+                options.pop(key, None)
         options.pop("reservationId", None)
 
     def _consume_reservation_if_used(self, options: typing.Dict[str, typing.Any]) -> None:

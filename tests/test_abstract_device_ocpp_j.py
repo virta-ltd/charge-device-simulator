@@ -419,21 +419,27 @@ class TestConsumeReservationIfUsed:
 
 class TestResetChargeCycleOptions:
     """Every `flow_charge` invocation must start a fresh cycle: replaying the
-    previous cycle's start/stop time or meterStop produces overlapping
-    transactions whose stop reading contradicts the periodic meter values."""
+    previous cycle's auto-filled start/stop time or meterStop produces
+    overlapping transactions whose stop reading contradicts the periodic meter
+    values. Values the operator pinned up front are the exception — they
+    describe a deterministic session and must survive every cycle."""
 
-    def _stale_options(self):
-        return {
-            "idTag": "ABC",
-            "connectorId": 1,
+    def _stale_options(self, device):
+        """Options as they look after an unpinned first cycle: the reset
+        recorded no operator-pinned keys, fill_missing_* then added the
+        cycle's values."""
+        options = {"idTag": "ABC", "connectorId": 1}
+        device._reset_charge_cycle_options(options)
+        options.update({
             "chargeStartTime": "2025-01-15T12:00:00+00:00",
             "chargeStopTime": "2025-01-15T12:30:00+00:00",
             "meterStop": 31000,
             "meterStart": 1000,
-        }
+        })
+        return options
 
     def test_drops_stale_charge_cycle_keys(self, ocpp_j_device):
-        options = self._stale_options()
+        options = self._stale_options(ocpp_j_device)
 
         ocpp_j_device._reset_charge_cycle_options(options)
 
@@ -445,7 +451,7 @@ class TestResetChargeCycleOptions:
 
     def test_carries_previous_meter_stop_into_meter_start(self, ocpp_j_device):
         """The energy register never rewinds between sessions on real hardware."""
-        options = self._stale_options()
+        options = self._stale_options(ocpp_j_device)
 
         ocpp_j_device._reset_charge_cycle_options(options)
 
@@ -457,7 +463,50 @@ class TestResetChargeCycleOptions:
 
         ocpp_j_device._reset_charge_cycle_options(options)
 
-        assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
+        assert options["idTag"] == "ABC"
+        assert options["connectorId"] == 1
+        assert options["meterStart"] == 1000
+
+    def test_pinned_session_shape_survives_consecutive_resets(self, ocpp_j_device):
+        """Operator-configured replay values must reach the wire on the first
+        cycle and every one after — including the very first reset, which used
+        to discard them before they were ever sent."""
+        options = {
+            "idTag": "ABC",
+            "connectorId": 1,
+            "meterStart": 1000,
+            "meterStop": 5000,
+            "chargeStartTime": "2025-01-01T00:00:00+00:00",
+            "chargeStopTime": "2025-01-01T01:00:00+00:00",
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        # The carry must not clobber the pinned meterStart with meterStop.
+        assert options["meterStart"] == 1000
+        assert options["meterStop"] == 5000
+        assert options["chargeStartTime"] == "2025-01-01T00:00:00+00:00"
+        assert options["chargeStopTime"] == "2025-01-01T01:00:00+00:00"
+
+    def test_auto_filled_keys_still_dropped_when_meter_start_is_pinned(self, ocpp_j_device):
+        """Only keys present before the first cycle are pinned; values filled
+        in during a cycle are still dropped and recomputed the next cycle, and
+        the carry from an auto-filled meterStop must not clobber the pin."""
+        options = {"idTag": "ABC", "meterStart": 1000}
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+        options.update({
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "chargeStopTime": "2025-01-15T12:30:00+00:00",
+            "meterStop": 31000,
+        })
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert "chargeStartTime" not in options
+        assert "chargeStopTime" not in options
+        assert "meterStop" not in options
+        assert options["meterStart"] == 1000
 
     def test_drops_gate_injected_reservation_id(self, ocpp_j_device):
         """reservationId is per-cycle state injected by the reservation gate;
@@ -470,18 +519,38 @@ class TestResetChargeCycleOptions:
         assert "reservationId" not in options
 
     def test_scripted_meter_values_keep_configured_meter_start(self, ocpp_j_device):
-        """Scripted registers are absolute and replay identically each cycle;
-        carrying the previous stop into meterStart would put it above the
-        replayed samples — a register rewind."""
+        """A meterStart pinned alongside a scripted meterValues list survives
+        the cycle whose stop reading was auto-filled from the script."""
         options = {
             "meterStart": 1000,
-            "meterStop": 2000,
             "meterValues": [
                 {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
                 {"meterValue": 2000, "timestamp": "t2", "secondsToSleep": 0},
             ],
         }
 
+        ocpp_j_device._reset_charge_cycle_options(options)
+        options["meterStop"] = 2000  # filled from the script during the cycle
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options["meterStart"] == 1000
+        assert "meterStop" not in options
+
+    def test_scripted_meter_values_skip_carry_even_when_unpinned(self, ocpp_j_device):
+        """Scripted registers are absolute and replay identically each cycle;
+        carrying the previous stop into meterStart would put it above the
+        replayed samples — a register rewind. Holds even when meterStart was
+        auto-filled rather than pinned."""
+        options = {
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 2000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+        options["meterStart"] = 1000  # auto-filled during the cycle
+        options["meterStop"] = 2000
         ocpp_j_device._reset_charge_cycle_options(options)
 
         assert options["meterStart"] == 1000
