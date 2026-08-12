@@ -154,6 +154,14 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
     async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: datetime = None) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
+        if self.charge_id == -1:
+            # TransactionEvent Updated must reference an open transaction;
+            # sending one outside a transaction (e.g. a triggered MeterValues
+            # after the session ended) would replay the previous transaction's
+            # id. Idle 2.0.1 readings belong in a MeterValues message, which
+            # this simulator does not implement.
+            self.logger.info(f"Action {action} skipped, no open transaction")
+            return True
         evse_id = options.get("evseId", 1)
         conenctor_id = options.get("connectorId", 1)
         self.charge_seq_no += 1
@@ -238,7 +246,14 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 "type":"ISO14443"
             }
         }
-        resp_json = await self.by_device_req_send(action, json_payload)
+        try:
+            resp_json = await self.by_device_req_send(action, json_payload)
+        finally:
+            # The local transaction context is dead once an Ended event has
+            # been attempted, whatever the response says — there is no retry
+            # path, and a kept id would let a later triggered MeterValues
+            # replay the dead transaction's UUID.
+            self.charge_id = -1
         if resp_json is None or len(resp_json) != 3 or not isinstance(resp_json[2], dict):
             await self.handle_error(
                 f"Action {action} Response Failed:\n{json.dumps(resp_json)}",

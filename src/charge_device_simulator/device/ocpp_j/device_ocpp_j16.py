@@ -171,7 +171,14 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
                 }]
             }]
         }
-        resp_json = await self.by_device_req_send(action, json_payload)
+        try:
+            resp_json = await self.by_device_req_send(action, json_payload)
+        finally:
+            # The local transaction context is dead once a stop has been
+            # attempted, whatever the conf says — there is no retry path, and
+            # a kept id would let a later triggered MeterValues re-attach the
+            # dead transaction.
+            self.charge_id = -1
         if resp_json is None or len(resp_json) != 3 or not isinstance(resp_json[2], dict):
             await self.handle_error(
                 f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
@@ -187,7 +194,6 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         if id_tag_info is not None and id_tag_info.get('status') != 'Accepted':
             self.logger.warning(
                 f"Action {action} idTagInfo status not Accepted (transaction still stopped):\n{json.dumps(id_tag_info)}")
-        self.charge_id = -1
         self.logger.info(f"Action {action} End")
         return True
 

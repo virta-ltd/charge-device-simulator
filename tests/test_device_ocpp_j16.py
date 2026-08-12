@@ -299,6 +299,8 @@ class TestJ16StopTransactionConfHandling:
 
     @pytest.mark.asyncio
     async def test_timeout_or_call_error_still_fails(self, device_ocpp_j16):
+        """The id must clear even when the conf never arrives — there is no
+        retry path, and a kept id would re-attach to later idle MeterValues."""
         device_ocpp_j16.error_exit = False
         device_ocpp_j16.charge_id = 555
         device_ocpp_j16.by_device_req_send = AsyncMock(return_value=None)
@@ -306,16 +308,18 @@ class TestJ16StopTransactionConfHandling:
         ok = await device_ocpp_j16.action_charge_stop(self._options())
 
         assert ok is False
-        assert device_ocpp_j16.charge_id == 555
+        assert device_ocpp_j16.charge_id == -1
 
     @pytest.mark.asyncio
     async def test_malformed_conf_still_fails(self, device_ocpp_j16):
         device_ocpp_j16.error_exit = False
+        device_ocpp_j16.charge_id = 555
         device_ocpp_j16.by_device_req_send = AsyncMock(return_value=[3, "r"])
 
         ok = await device_ocpp_j16.action_charge_stop(self._options())
 
         assert ok is False
+        assert device_ocpp_j16.charge_id == -1
 
 
 class TestJ16ChargeCycleIsolation:
