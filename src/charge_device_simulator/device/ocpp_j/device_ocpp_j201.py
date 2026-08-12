@@ -261,6 +261,10 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
             self.charge_in_progress = False
             return False
         if not await self.action_charge_start(options):
+            # Occupied was already announced above; without this best-effort
+            # rollback a rejected transaction start leaves the connector shown
+            # as Occupied on the CSMS forever.
+            await self.action_status_update("Available", options)
             self.charge_in_progress = False
             return False
         self._consume_reservation_if_used(options)

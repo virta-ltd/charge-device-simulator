@@ -17,8 +17,8 @@ def _stub_authorize_response(id_tag: str, parent_id_tag: str = None):
     return [3, "req-1", {"idTagInfo": info}]
 
 
-def _stub_start_transaction_response(transaction_id: int = 555):
-    return [3, "req-1", {"idTagInfo": {"status": "Accepted"}, "transactionId": transaction_id}]
+def _stub_start_transaction_response(transaction_id: int = 555, status: str = "Accepted"):
+    return [3, "req-1", {"idTagInfo": {"status": status}, "transactionId": transaction_id}]
 
 
 def _seed_reservation(device, *, reservation_id=42, connector_id=1,
@@ -315,6 +315,37 @@ class TestJ16MidFlowFailureStillStops:
 
         assert ok is False
         assert "StopTransaction" not in actions
+
+
+class TestJ16RejectedStartRollsBackStatus:
+    """Preparing is sent before StartTransaction; if the CSMS then rejects the
+    start (e.g. the tag turned Blocked between Authorize and start), the flow
+    must send Available so the connector isn't left stuck in Preparing."""
+
+    @pytest.mark.asyncio
+    async def test_blocked_start_sends_available_after_preparing(self, device_ocpp_j16, no_sleep):
+        device_ocpp_j16.error_exit = False
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload))
+            if action == "StartTransaction":
+                return _stub_start_transaction_response(status="Blocked")
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        ok = await device_ocpp_j16.flow_charge(True, {
+            "connectorId": 1, "idTag": "X",
+            "autoActionsLoopDelayInSeconds": 0, "autoActionsLoopCount": 1,
+        })
+
+        assert ok is False
+        statuses = [p.get("status") for a, p in sent if a == "StatusNotification"]
+        assert statuses == ["Preparing", "Available"]
+        # No transaction was ever opened, so nothing to stop
+        assert "StopTransaction" not in [a for a, _ in sent]
+        assert device_ocpp_j16.charge_in_progress is False
 
 
 class TestJ16ScriptedMeterValuesFlow:
