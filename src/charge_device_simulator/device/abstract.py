@@ -19,11 +19,6 @@ class DeviceAbstract(abc.ABC):
         self.name: str = ''
         self.charge_in_progress: bool = False
         self.charge_id: typing.Any = -1
-        # Set True by Simulator.lifecycle_start when running an interactive
-        # session. Enables UX-only behaviors (e.g. refreshing per-cycle
-        # ephemeral options on each flow_charge); never affects non-interactive
-        # / frequent-flow runs.
-        self.interactive_mode: bool = False
         self.reservation_id: typing.Optional[int] = None
         self.reservation_connector_id: typing.Optional[int] = None
         self.reservation_id_tag: typing.Optional[str] = None
@@ -70,8 +65,12 @@ class DeviceAbstract(abc.ABC):
             return False
         pass
 
-    def by_device_req_resp_timeout(self) -> str:
-        return f'"response timeout, {self.response_timeout_seconds} seconds passed"'
+    def by_device_req_resp_timeout(self) -> None:
+        # None makes callers treat the timeout as a failed request; anything
+        # truthy would let actions that only check `is None` log success for
+        # a request the middleware never answered.
+        self.logger.warning(f"Response timeout, {self.response_timeout_seconds} seconds passed")
+        return None
 
     @abc.abstractmethod
     async def action_register(self) -> bool:
@@ -131,10 +130,14 @@ class DeviceAbstract(abc.ABC):
                                and 'secondsToSleep' in i
                                for i in meter_values)):
                 raise ValueError("meterValues must be a list of dictionaries with 'meterValue', 'timestamp' and 'secondsToSleep' keys.")
+            # Baseline for the delivered-sample record: with zero samples
+            # delivered the session reported no energy beyond meterStart.
+            options[self._LAST_SENT_SCRIPTED_METER_VALUE] = options.get("meterStart")
             for i in meter_values:
                 await asyncio.sleep(i["secondsToSleep"])
                 if not await self.action_meter_value(options, meter_value=i["meterValue"], time_stamp=i["timestamp"]):
                     return False
+                options[self._LAST_SENT_SCRIPTED_METER_VALUE] = i["meterValue"]
             return True
         else:
             charge_loop_wait_seconds = options.get("autoActionsLoopDelayInSeconds", 15)
@@ -174,7 +177,12 @@ class DeviceAbstract(abc.ABC):
     def reserve_can_accept(self, connector_id: typing.Optional[int]) -> bool:
         if self.charge_in_progress:
             return False
-        if self.reservation_is_active() and self.reservation_connector_id == connector_id:
+        # The device stores a single reservation, so accepting another while
+        # one is active — same connector, a different one, or connector 0,
+        # which reserves the charge point as a whole — would silently
+        # overwrite the stored record and drop the protection the first
+        # Accepted promised.
+        if self.reservation_is_active():
             return False
         return True
 
@@ -203,15 +211,18 @@ class DeviceAbstract(abc.ABC):
         self.reservation_expiry_date = None
 
     def _pre_charge_reservation_gate(self, options: typing.Dict[str, typing.Any]) -> bool:
-        """If the connector has an active reservation, validate the most recent
-        authorize info against it (direct idTag or parent/group match). On match,
-        injects reservationId into options so the start payload carries it."""
+        """If an active reservation covers the requested connector — stored on
+        that connector, or on connector 0, which in OCPP 1.6 reserves the
+        charge point as a whole and so applies to every connector — validate
+        the most recent authorize info against it (direct idTag or
+        parent/group match). On match, injects reservationId into options so
+        the start payload carries it."""
         # Mirror action_charge_start's default — a missing connectorId would
         # otherwise compare None against the stored connector and silently
         # skip the gate (letting a non-matching tag through on a reserved
         # connector).
         connector_id = options.get("connectorId", 1)
-        if not self.reservation_is_active() or self.reservation_connector_id != connector_id:
+        if not self.reservation_is_active() or self.reservation_connector_id not in (0, connector_id):
             return True
         requested_id_tag = options.get("idTag")
         if requested_id_tag is not None and requested_id_tag == self.reservation_id_tag:
@@ -228,17 +239,75 @@ class DeviceAbstract(abc.ABC):
             f"{self.reservation_id} on connector {connector_id}")
         return False
 
+    @staticmethod
+    def _scripted_final_meter_value(options: typing.Dict[str, typing.Any]) -> typing.Optional[int]:
+        """Last register reading of a scripted meterValues list, if one is
+        configured. The stop reading must repeat it — a meterStop computed
+        from wall-clock time would contradict the samples already sent."""
+        meter_values = options.get("meterValues")
+        if isinstance(meter_values, list) and meter_values:
+            last = meter_values[-1]
+            if isinstance(last, dict) and "meterValue" in last:
+                return last["meterValue"]
+        return None
+
+    def _scripted_stop_meter_value(self, options: typing.Dict[str, typing.Any]) -> typing.Optional[int]:
+        """Register reading the stop payload should carry for a scripted
+        meterValues session, or None when no script is configured. Prefers the
+        last sample the ongoing loop actually delivered: when a send fails
+        mid-script the remaining samples never went out, and a meterStop above
+        the last delivered reading would bill energy the session never
+        reported. Falls back to the script's final value when the loop hasn't
+        run (direct action_charge_stop calls)."""
+        scripted_final = self._scripted_final_meter_value(options)
+        if scripted_final is None:
+            return None
+        last_sent = options.get(self._LAST_SENT_SCRIPTED_METER_VALUE)
+        return last_sent if last_sent is not None else scripted_final
+
+    # Recorded inside the options dict itself so the record travels with the
+    # dict shared across cycles. Payload builders read specific keys only, so
+    # the extra entry never reaches the wire.
+    _PINNED_CHARGE_CYCLE_KEYS = "_pinnedChargeCycleKeys"
+    _LAST_SENT_SCRIPTED_METER_VALUE = "_lastSentScriptedMeterValue"
+    _CHARGE_CYCLE_EPHEMERAL_KEYS = ("chargeStartTime", "chargeStopTime", "meterStop", "meterStart")
+
     def _reset_charge_cycle_options(self, options: typing.Dict[str, typing.Any]) -> None:
-        """In interactive mode only, drop per-cycle ephemeral keys so a re-run
-        of flow_charge picks up fresh start/stop timestamps and a recomputed
-        meterStop. Without this, a second Flow charge in the same interactive
-        session would replay the first cycle's `chargeStartTime` because the
-        dict is shared. Frequent-flow / non-interactive runs are intentionally
-        unaffected — they construct their own options each loop iteration."""
-        if not self.interactive_mode:
-            return
+        """Drop the previous cycle's auto-filled values so every flow_charge
+        run picks up fresh start/stop timestamps and a recomputed meterStop,
+        while preserving values the operator configured. The options dict is
+        shared across runs (frequent flows pass the configured dict by
+        reference), so without the reset every cycle after the first replays
+        the first cycle's chargeStartTime/chargeStopTime/meterStop — producing
+        overlapping transactions whose meterStop contradicts the periodic
+        meter values, which billing backends reject. But the operator may pin
+        any of those keys (plus meterStart) up front to replay a deterministic
+        session: the first call records which ephemeral keys are already
+        present, and every call drops only the unpinned ones. The previous
+        cycle's meterStop is carried into meterStart so the energy register
+        stays monotonic like a real meter — skipped when either meter key is
+        pinned (the configured session shape wins) or a scripted meterValues
+        list is configured: its readings are absolute and replay identically
+        each cycle, so carrying the stop forward would put meterStart above
+        the replayed samples (a register rewind). reservationId is always
+        dropped: the reservation gate injects it per cycle, and replaying it
+        would attach an already-consumed reservation to the next
+        StartTransaction."""
+        pinned = options.get(self._PINNED_CHARGE_CYCLE_KEYS)
+        if pinned is None:
+            pinned = tuple(key for key in self._CHARGE_CYCLE_EPHEMERAL_KEYS if key in options)
+            options[self._PINNED_CHARGE_CYCLE_KEYS] = pinned
+        if ("meterStop" in options
+                and "meterStop" not in pinned and "meterStart" not in pinned
+                and self._scripted_final_meter_value(options) is None):
+            options["meterStart"] = options["meterStop"]
         for key in ("chargeStartTime", "chargeStopTime", "meterStop"):
-            options.pop(key, None)
+            if key not in pinned:
+                options.pop(key, None)
+        options.pop("reservationId", None)
+        # Per-cycle delivery record; a stale value would make the next cycle's
+        # stop reading repeat the previous cycle's last delivered sample.
+        options.pop(self._LAST_SENT_SCRIPTED_METER_VALUE, None)
 
     def _consume_reservation_if_used(self, options: typing.Dict[str, typing.Any]) -> None:
         if "reservationId" in options and self.reservation_is_active() \

@@ -154,6 +154,14 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
     async def action_meter_value(self, options: dict, meter_value: int = None, time_stamp: datetime = None) -> bool:
         action = "MeterValues"
         self.logger.info(f"Action {action} Start")
+        if self.charge_id == -1:
+            # TransactionEvent Updated must reference an open transaction;
+            # sending one outside a transaction (e.g. a triggered MeterValues
+            # after the session ended) would replay the previous transaction's
+            # id. Idle 2.0.1 readings belong in a MeterValues message, which
+            # this simulator does not implement.
+            self.logger.info(f"Action {action} skipped, no open transaction")
+            return True
         evse_id = options.get("evseId", 1)
         conenctor_id = options.get("connectorId", 1)
         self.charge_seq_no += 1
@@ -171,7 +179,7 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 {
                     "sampledValue": [
                         {
-                            "value": meter_value if meter_value else self.charge_meter_value_current(options),
+                            "value": meter_value if meter_value is not None else self.charge_meter_value_current(options),
                             "context":"Sample.Periodic",
                             "measurand": "Energy.Active.Import.Register",
                             "location": "Outlet",
@@ -238,12 +246,27 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
                 "type":"ISO14443"
             }
         }
-        resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or resp_json[2][key_name]['status'] != 'Accepted':
+        try:
+            resp_json = await self.by_device_req_send(action, json_payload)
+        finally:
+            # The local transaction context is dead once an Ended event has
+            # been attempted, whatever the response says — there is no retry
+            # path, and a kept id would let a later triggered MeterValues
+            # replay the dead transaction's UUID.
+            self.charge_id = -1
+        if resp_json is None or len(resp_json) != 3 or not isinstance(resp_json[2], dict):
             await self.handle_error(
                 f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
                 ErrorReasons.InvalidResponse)
             return False
+        # idTokenInfo is optional in TransactionEventResponse and concerns the
+        # token, not whether the Ended event was registered — an empty payload
+        # is the common success response. Any valid CALLRESULT closes the
+        # transaction.
+        id_token_info = resp_json[2].get(key_name)
+        if id_token_info is not None and id_token_info.get('status') != 'Accepted':
+            self.logger.warning(
+                f"Action {action} idTokenInfo status not Accepted (transaction still ended):\n{json.dumps(id_token_info)}")
         self.logger.info(f"Action {action} End")
         return True
 
@@ -261,20 +284,24 @@ class DeviceOcppJ201(AbstractDeviceOcppJ):
             self.charge_in_progress = False
             return False
         if not await self.action_charge_start(options):
+            # Occupied was already announced above; without this best-effort
+            # rollback a rejected transaction start leaves the connector shown
+            # as Occupied on the CSMS forever.
+            await self.action_status_update("Available", options)
             self.charge_in_progress = False
             return False
         self._consume_reservation_if_used(options)
-        if not await self.flow_charge_ongoing_loop(auto_stop, options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_charge_stop(options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Available", options):
-            self.charge_in_progress = False
+        # The backend opened a transaction at StartTransaction; from here on a
+        # failed step must not skip StopTransaction, or the session is left
+        # open server-side (never billed/completed) while charge_can_stop
+        # rejects any later RemoteStopTransaction.
+        ok = await self.flow_charge_ongoing_loop(auto_stop, options)
+        ok = await self.action_charge_stop(options) and ok
+        ok = await self.action_status_update("Available", options) and ok
+        self.charge_in_progress = False
+        if not ok:
             return False
         self.logger.info(f"Flow {log_title} End")
-        self.charge_in_progress = False
         return True
 
     def _reserve_now_options_from_payload(

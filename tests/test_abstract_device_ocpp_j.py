@@ -1,4 +1,6 @@
+import asyncio
 import datetime
+import json
 import math
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -269,6 +271,39 @@ class TestFlowReserve:
         assert ocpp_j_device.reservation_id == 1
         ocpp_j_device.action_status_update.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_rejected_when_charge_point_reserved_via_connector_zero(self, ocpp_j_device):
+        """A connector-0 reservation covers the charge point as a whole; a
+        later ReserveNow for a specific connector must not silently overwrite
+        it and strip the reserved tag's protection."""
+        _seed_reservation(ocpp_j_device, reservation_id=1, connector_id=0)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reserve({
+            "reservationId": 99, "connectorId": 1, "idTag": "OTHER"
+        })
+
+        assert result is False
+        assert ocpp_j_device.reservation_id == 1
+        assert ocpp_j_device.reservation_connector_id == 0
+        ocpp_j_device.action_status_update.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rejected_on_other_connector_while_a_reservation_is_active(self, ocpp_j_device):
+        """The device stores a single reservation; accepting one for a
+        different connector would silently drop the stored record."""
+        _seed_reservation(ocpp_j_device, reservation_id=1, connector_id=1)
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+
+        result = await ocpp_j_device.flow_reserve({
+            "reservationId": 99, "connectorId": 2, "idTag": "OTHER"
+        })
+
+        assert result is False
+        assert ocpp_j_device.reservation_id == 1
+        assert ocpp_j_device.reservation_connector_id == 1
+        ocpp_j_device.action_status_update.assert_not_awaited()
+
 
 class TestFlowReservationCancel:
     @pytest.mark.asyncio
@@ -367,6 +402,33 @@ class TestPreChargeReservationGate:
         assert ocpp_j_device._pre_charge_reservation_gate(options) is False
         assert "reservationId" not in options
 
+    def test_connector_zero_reservation_blocks_wrong_tag_on_any_connector(self, ocpp_j_device):
+        # OCPP 1.6: connectorId 0 in ReserveNow reserves the charge point as
+        # a whole, so the gate must apply it to whichever connector the
+        # charge requests.
+        _seed_reservation(ocpp_j_device, reservation_id=20, connector_id=0, id_tag="OWNER")
+        options = {"connectorId": 1, "idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+        assert "reservationId" not in options
+
+    def test_connector_zero_reservation_blocks_wrong_tag_when_connector_id_missing(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=21, connector_id=0, id_tag="OWNER")
+        options = {"idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+        assert "reservationId" not in options
+
+    def test_connector_zero_reservation_matching_tag_injects_reservation_id(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=22, connector_id=0, id_tag="OWNER")
+        options = {"connectorId": 1, "idTag": "OWNER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is True
+        assert options["reservationId"] == 22
+        # The requested connector still goes out in the start payload; the
+        # gate must not rewrite it to the reservation's connector 0.
+        assert options["connectorId"] == 1
+
 
 class TestConsumeReservationIfUsed:
     def test_clears_when_reservation_id_in_options_matches(self, ocpp_j_device):
@@ -389,41 +451,228 @@ class TestConsumeReservationIfUsed:
 
 
 class TestResetChargeCycleOptions:
-    """A second `flow_charge` invocation in an interactive session must not
-    replay the previous cycle's start/stop time or computed meterStop. The
-    same reset must NOT happen in non-interactive (frequent-flow) runs to
-    preserve historical behavior."""
+    """Every `flow_charge` invocation must start a fresh cycle: replaying the
+    previous cycle's auto-filled start/stop time or meterStop produces
+    overlapping transactions whose stop reading contradicts the periodic meter
+    values. Values the operator pinned up front are the exception — they
+    describe a deterministic session and must survive every cycle."""
 
-    def _stale_options(self):
-        return {
-            "idTag": "ABC",
-            "connectorId": 1,
+    def _stale_options(self, device):
+        """Options as they look after an unpinned first cycle: the reset
+        recorded no operator-pinned keys, fill_missing_* then added the
+        cycle's values."""
+        options = {"idTag": "ABC", "connectorId": 1}
+        device._reset_charge_cycle_options(options)
+        options.update({
             "chargeStartTime": "2025-01-15T12:00:00+00:00",
             "chargeStopTime": "2025-01-15T12:30:00+00:00",
             "meterStop": 31000,
             "meterStart": 1000,
-        }
+        })
+        return options
 
-    def test_drops_stale_charge_cycle_keys_when_interactive(self, ocpp_j_device):
-        ocpp_j_device.interactive_mode = True
-        options = self._stale_options()
+    def test_drops_stale_charge_cycle_keys(self, ocpp_j_device):
+        options = self._stale_options(ocpp_j_device)
 
         ocpp_j_device._reset_charge_cycle_options(options)
 
         assert "chargeStartTime" not in options
         assert "chargeStopTime" not in options
         assert "meterStop" not in options
-        # Caller-supplied config (idTag, connectorId, meterStart) is untouched
-        assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
+        assert options["idTag"] == "ABC"
+        assert options["connectorId"] == 1
 
-    def test_keeps_options_when_not_interactive(self, ocpp_j_device):
-        # Default (interactive_mode=False) — frequent-flow / non-interactive run
-        options = self._stale_options()
-        snapshot = dict(options)
+    def test_carries_previous_meter_stop_into_meter_start(self, ocpp_j_device):
+        """The energy register never rewinds between sessions on real hardware."""
+        options = self._stale_options(ocpp_j_device)
 
         ocpp_j_device._reset_charge_cycle_options(options)
 
-        assert options == snapshot
+        assert options["meterStart"] == 31000
+
+    def test_keeps_meter_start_on_first_cycle(self, ocpp_j_device):
+        """No previous cycle (no meterStop) leaves the configured start alone."""
+        options = {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options["idTag"] == "ABC"
+        assert options["connectorId"] == 1
+        assert options["meterStart"] == 1000
+
+    def test_pinned_session_shape_survives_consecutive_resets(self, ocpp_j_device):
+        """Operator-configured replay values must reach the wire on the first
+        cycle and every one after — including the very first reset, which used
+        to discard them before they were ever sent."""
+        options = {
+            "idTag": "ABC",
+            "connectorId": 1,
+            "meterStart": 1000,
+            "meterStop": 5000,
+            "chargeStartTime": "2025-01-01T00:00:00+00:00",
+            "chargeStopTime": "2025-01-01T01:00:00+00:00",
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        # The carry must not clobber the pinned meterStart with meterStop.
+        assert options["meterStart"] == 1000
+        assert options["meterStop"] == 5000
+        assert options["chargeStartTime"] == "2025-01-01T00:00:00+00:00"
+        assert options["chargeStopTime"] == "2025-01-01T01:00:00+00:00"
+
+    def test_auto_filled_keys_still_dropped_when_meter_start_is_pinned(self, ocpp_j_device):
+        """Only keys present before the first cycle are pinned; values filled
+        in during a cycle are still dropped and recomputed the next cycle, and
+        the carry from an auto-filled meterStop must not clobber the pin."""
+        options = {"idTag": "ABC", "meterStart": 1000}
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+        options.update({
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "chargeStopTime": "2025-01-15T12:30:00+00:00",
+            "meterStop": 31000,
+        })
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert "chargeStartTime" not in options
+        assert "chargeStopTime" not in options
+        assert "meterStop" not in options
+        assert options["meterStart"] == 1000
+
+    def test_drops_gate_injected_reservation_id(self, ocpp_j_device):
+        """reservationId is per-cycle state injected by the reservation gate;
+        replaying it would attach an already-consumed reservation to the next
+        StartTransaction."""
+        options = {"idTag": "ABC", "reservationId": 7}
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert "reservationId" not in options
+
+    def test_drops_delivered_sample_record(self, ocpp_j_device):
+        """The delivered-sample record is per-cycle state written by the
+        ongoing loop; a stale value would make the next cycle's stop reading
+        repeat the previous cycle's last delivered sample."""
+        record_key = ocpp_j_device._LAST_SENT_SCRIPTED_METER_VALUE
+        options = {
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+            ],
+            record_key: 1500,
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert record_key not in options
+
+    def test_scripted_meter_values_keep_configured_meter_start(self, ocpp_j_device):
+        """A meterStart pinned alongside a scripted meterValues list survives
+        the cycle whose stop reading was auto-filled from the script."""
+        options = {
+            "meterStart": 1000,
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 2000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+        options["meterStop"] = 2000  # filled from the script during the cycle
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options["meterStart"] == 1000
+        assert "meterStop" not in options
+
+    def test_scripted_meter_values_skip_carry_even_when_unpinned(self, ocpp_j_device):
+        """Scripted registers are absolute and replay identically each cycle;
+        carrying the previous stop into meterStart would put it above the
+        replayed samples — a register rewind. Holds even when meterStart was
+        auto-filled rather than pinned."""
+        options = {
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 2000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+        options["meterStart"] = 1000  # auto-filled during the cycle
+        options["meterStop"] = 2000
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options["meterStart"] == 1000
+        assert "meterStop" not in options
+
+
+class TestScriptedMeterValuesStopReading:
+    """The stop reading must repeat the script's final register value; a
+    wall-clock-computed meterStop contradicts the samples already sent and
+    makes the session unbillable."""
+
+    def test_meter_stop_defaults_to_last_scripted_value(self, ocpp_j_device):
+        options = {
+            "meterStart": 1000,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 2000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 2000
+
+    def test_explicit_meter_stop_still_wins_over_script(self, ocpp_j_device):
+        options = {
+            "meterStop": 9999,
+            "chargeStopTime": "2025-01-15T12:30:00+00:00",
+            "meterValues": [
+                {"meterValue": 2000, "timestamp": "t", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 9999
+
+    @pytest.mark.asyncio
+    async def test_meter_stop_repeats_last_delivered_sample_after_mid_script_failure(self, ocpp_j_device):
+        """When a send fails mid-script the remaining samples never go out;
+        a meterStop taken from the script's final value would bill energy the
+        session never reported."""
+        options = {
+            "meterStart": 1000,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 10000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+        ocpp_j_device.action_meter_value = AsyncMock(side_effect=[True, False])
+
+        assert await ocpp_j_device.flow_charge_ongoing_loop(True, options) is False
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 1500
+
+    @pytest.mark.asyncio
+    async def test_meter_stop_falls_back_to_meter_start_when_no_sample_was_delivered(self, ocpp_j_device):
+        options = {
+            "meterStart": 1000,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+            ],
+        }
+        ocpp_j_device.action_meter_value = AsyncMock(return_value=False)
+
+        assert await ocpp_j_device.flow_charge_ongoing_loop(True, options) is False
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 1000
 
 
 class TestInteractiveReservationHandlers:
@@ -497,6 +746,166 @@ class TestInteractiveReservationHandlers:
             await ocpp_j_device.interactive_reservation_cancel()
 
         ocpp_j_device.flow_reservation_cancel.assert_awaited_once_with(999)
+
+
+class TestCallErrorAndTimeoutAreFailures:
+    """A CALLERROR (message type 4) used to fall through to the "Type Unknown"
+    branch, leaving the request to time out; the timeout in turn returned a
+    truthy string, so actions that only check `is None` logged success for
+    messages the middleware had rejected."""
+
+    def _pending(self, device):
+        return device._AbstractDeviceOcppJ__pending_by_device_reqs
+
+    async def _run_with_inbound(self, device, frame_for):
+        """Send one request while a reader loop answers it with `frame_for(req_id)`."""
+        device.response_timeout_seconds = 5
+        sent = asyncio.Event()
+        device._ws = MagicMock()
+        device._ws.send = AsyncMock(side_effect=lambda raw: sent.set())
+
+        answered = False
+
+        async def fake_recv():
+            nonlocal answered
+            await sent.wait()
+            if answered:
+                await asyncio.Event().wait()  # nothing more to deliver
+            answered = True
+            return frame_for(next(iter(self._pending(device))))
+
+        device._ws.recv = AsyncMock(side_effect=fake_recv)
+        loop_task = asyncio.create_task(
+            device._AbstractDeviceOcppJ__loop_internal())
+        try:
+            return await device.by_device_req_send("Heartbeat", {})
+        finally:
+            loop_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_call_error_resolves_request_as_none(self, ocpp_j_device):
+        result = await self._run_with_inbound(
+            ocpp_j_device,
+            lambda req_id: json.dumps(
+                [4, req_id, "SecurityError", "Rejected by CSMS", {}]),
+        )
+
+        assert result is None
+        # The pending entry is cleared, not left to leak until timeout
+        assert self._pending(ocpp_j_device) == {}
+
+    @pytest.mark.asyncio
+    async def test_call_result_still_resolves_normally(self, ocpp_j_device):
+        result = await self._run_with_inbound(
+            ocpp_j_device,
+            lambda req_id: json.dumps([3, req_id, {"currentTime": "now"}]),
+        )
+
+        assert result is not None
+        assert result[2] == {"currentTime": "now"}
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_none(self, ocpp_j_device):
+        ocpp_j_device.response_timeout_seconds = 0
+        ocpp_j_device._ws = MagicMock()
+        ocpp_j_device._ws.send = AsyncMock()
+
+        assert await ocpp_j_device.by_device_req_send("Heartbeat", {}) is None
+        # The timed-out request must not leak its pending entry: a late reply
+        # would find it and resolve a future wait_for already cancelled.
+        assert self._pending(ocpp_j_device) == {}
+
+    @pytest.mark.asyncio
+    async def test_late_reply_after_timeout_does_not_kill_read_loop(self, ocpp_j_device):
+        """A CALLRESULT/CALLERROR landing after the timeout is an orphan;
+        resolving the cancelled future instead raised InvalidStateError inside
+        the read loop, silently killing it while the socket stayed open."""
+        ocpp_j_device.response_timeout_seconds = 0
+        sent_frames = []
+        ocpp_j_device._ws = MagicMock()
+        ocpp_j_device._ws.send = AsyncMock(side_effect=lambda raw: sent_frames.append(raw))
+
+        assert await ocpp_j_device.by_device_req_send("Heartbeat", {}) is None
+        req_id = json.loads(sent_frames[0])[1]
+
+        drained = asyncio.Event()
+        late_frames = [
+            json.dumps([3, req_id, {"currentTime": "now"}]),
+            json.dumps([4, req_id, "GenericError", "late rejection", {}]),
+        ]
+
+        async def fake_recv():
+            if late_frames:
+                return late_frames.pop(0)
+            drained.set()
+            await asyncio.Event().wait()  # nothing more to deliver
+
+        ocpp_j_device._ws.recv = AsyncMock(side_effect=fake_recv)
+        loop_task = asyncio.create_task(
+            ocpp_j_device._AbstractDeviceOcppJ__loop_internal())
+        try:
+            await asyncio.wait_for(drained.wait(), timeout=2)
+            assert not loop_task.done()
+        finally:
+            loop_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_meter_values_reports_failure_on_timeout(self, device_ocpp_j16):
+        """The action must not log success for an unanswered request."""
+        device_ocpp_j16.response_timeout_seconds = 0
+
+        ok = await device_ocpp_j16.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_status_notification_reports_failure_on_timeout(self, device_ocpp_j16):
+        device_ocpp_j16.response_timeout_seconds = 0
+
+        ok = await device_ocpp_j16.action_status_update("Charging", {"connectorId": 1})
+
+        assert ok is False
+
+
+class TestTriggerMessageDoesNotBlockReader:
+    """The TriggerMessage branches must schedule the resulting action as a
+    task, not await it inline: by_middleware_req runs inside the websocket
+    read loop, and the action's own response can only be delivered by that
+    same loop — awaiting deadlocks until the response timeout, after which
+    asyncio.create_task(False) raises TypeError and kills the reader."""
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_trigger_schedules_action_as_task(self, ocpp_j_device):
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+        ocpp_j_device.action_heart_beat = AsyncMock(return_value=True)
+
+        await ocpp_j_device.by_middleware_req(
+            "req1", "triggermessage", {"requestedMessage": "Heartbeat"})
+
+        # The handler must return without having awaited the action inline...
+        ocpp_j_device.action_heart_beat.assert_not_awaited()
+        resp = ocpp_j_device.by_middleware_req_response_ready.await_args.args[1]
+        assert resp == {"status": "Accepted"}
+        # ...and the scheduled task runs once the loop gets control back.
+        await asyncio.sleep(0)
+        ocpp_j_device.action_heart_beat.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_status_trigger_schedules_action_as_task(self, ocpp_j_device):
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+        ocpp_j_device.charge_in_progress = True
+
+        await ocpp_j_device.by_middleware_req(
+            "req1", "triggermessage",
+            {"requestedMessage": "StatusNotification", "connectorId": 2})
+
+        ocpp_j_device.action_status_update.assert_not_awaited()
+        await asyncio.sleep(0)
+        ocpp_j_device.action_status_update.assert_awaited_once()
+        args = ocpp_j_device.action_status_update.await_args.args
+        assert args[0] == "Charging"
+        assert args[1]["connectorId"] == 2
 
 
 class TestInboundReserveNowCancelReservation:

@@ -145,7 +145,9 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
         if "chargeStopTime" not in options:
             options["chargeStopTime"] = self.utcnow_iso()
         if "meterStop" not in options:
-            options["meterStop"] = self.charge_meter_value_current(options)
+            scripted_stop = self._scripted_stop_meter_value(options)
+            options["meterStop"] = (scripted_stop if scripted_stop is not None
+                                    else self.charge_meter_value_current(options))
 
     async def action_charge_start(self, options: dict) -> bool:
         action = "charge_start"
@@ -182,7 +184,7 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
             "out": options.get("connectorId", 1),
             "time": self.utcnow().timestamp() if time_stamp is None else time_stamp,
             "t": 382,
-            "eem": (meter_value if meter_value else self.charge_meter_value_current(options)) - options["meterStart"],
+            "eem": (meter_value if meter_value is not None else self.charge_meter_value_current(options)) - options["meterStart"],
         }
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None or 'chk' not in resp_json or 'ack' not in resp_json:
@@ -232,6 +234,7 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
     async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
+        self._reset_charge_cycle_options(options)
         if not options.get("is_remote_started", False):
             if not await self.action_authorize(options):
                 self.charge_in_progress = False

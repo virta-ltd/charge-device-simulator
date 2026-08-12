@@ -183,27 +183,6 @@ class TestErrorExitInteractiveBehavior:
         # still crash on rejected responses (the existing fail-fast behavior).
         assert mock_device.error_exit is True
 
-    @pytest.mark.asyncio
-    async def test_lifecycle_start_flips_interactive_mode(
-            self, simulator, mock_device):
-        mock_device.interactive_mode = False
-        simulator.is_interactive = True
-        simulator.frequent_flow_enabled = False
-        with patch.object(simulator, "loop_interactive", new_callable=AsyncMock):
-            await simulator.lifecycle_start()
-
-        assert mock_device.interactive_mode is True
-
-    @pytest.mark.asyncio
-    async def test_lifecycle_start_leaves_interactive_mode_when_not_interactive(
-            self, simulator, mock_device):
-        mock_device.interactive_mode = False
-        simulator.is_interactive = False
-        simulator.frequent_flow_enabled = False
-
-        await simulator.lifecycle_start()
-
-        assert mock_device.interactive_mode is False
 
 
 class TestSimulatorErrorHandling:

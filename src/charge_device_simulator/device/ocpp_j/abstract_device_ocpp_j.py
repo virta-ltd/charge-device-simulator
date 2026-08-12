@@ -107,7 +107,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         pass
 
     async def action_heart_beat(self) -> bool:
-        action = "HeartBeat"
+        action = "Heartbeat"
         self.logger.info(f"Action {action} Start")
         if await self.by_device_req_send(action, {}) is None:
             return False
@@ -134,7 +134,9 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if "chargeStopTime" not in options:
             options["chargeStopTime"] = self.utcnow_iso()
         if "meterStop" not in options:
-            options["meterStop"] = self.charge_meter_value_current(options)
+            scripted_stop = self._scripted_stop_meter_value(options)
+            options["meterStop"] = (scripted_stop if scripted_stop is not None
+                                    else self.charge_meter_value_current(options))
 
     def charge_meter_value_current(self, options: dict):
         self.fill_missing_options_charge_start(options)
@@ -170,30 +172,33 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if not self._pre_charge_reservation_gate(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_charge_start(options):
-            self.charge_in_progress = False
-            return False
-        self._consume_reservation_if_used(options)
+        # Preparing precedes StartTransaction: the connector reaches that state
+        # when the cable is plugged and the tag accepted, before the
+        # transaction exists.
         if not await self.action_status_update("Preparing", options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Charging", options):
+        if not await self.action_charge_start(options):
+            # Preparing was already announced above; without this best-effort
+            # rollback a rejected StartTransaction leaves the connector shown
+            # as Preparing on the CSMS forever.
+            await self.action_status_update("Available", options)
             self.charge_in_progress = False
             return False
-        if not await self.flow_charge_ongoing_loop(auto_stop, options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Finishing", options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_charge_stop(options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Available", options):
-            self.charge_in_progress = False
+        self._consume_reservation_if_used(options)
+        # The backend opened a transaction at StartTransaction; from here on a
+        # failed step must not skip StopTransaction, or the session is left
+        # open server-side (never billed/completed) while charge_can_stop
+        # rejects any later RemoteStopTransaction.
+        ok = await self.action_status_update("Charging", options)
+        ok = await self.flow_charge_ongoing_loop(auto_stop, options) and ok
+        ok = await self.action_status_update("Finishing", options) and ok
+        ok = await self.action_charge_stop(options) and ok
+        ok = await self.action_status_update("Available", options) and ok
+        self.charge_in_progress = False
+        if not ok:
             return False
         self.logger.info(f"Flow {log_title} End")
-        self.charge_in_progress = False
         return True
 
     async def flow_charge_ongoing_actions(self, options: dict) -> bool:
@@ -217,11 +222,20 @@ class AbstractDeviceOcppJ(DeviceAbstract):
             return await asyncio.wait_for(result, timeout=self.response_timeout_seconds)
         except asyncio.TimeoutError:
             return self.by_device_req_resp_timeout()
+        finally:
+            # Drop the entry on timeout/cancellation too, so a late reply is
+            # logged as an orphan instead of resolving a dead future, and the
+            # class-level dict doesn't grow with every unanswered request.
+            self.__pending_by_device_reqs.pop(req_id, None)
 
     def __by_device_req_resp_ready(self, future: asyncio.Future, action, resp_json):
         resp = json.dumps(resp_json)
         self.logger.debug(f"By Device Req ({action}) Resp:\n{resp}")
-        future.set_result(resp_json)
+        # The future is cancelled if the reply lands in the same loop iteration
+        # that asyncio.wait_for timed out; set_result would then raise
+        # InvalidStateError inside the websocket read loop and kill it.
+        if not future.done():
+            future.set_result(resp_json)
         pass
 
     async def __loop_internal(self):
@@ -253,6 +267,19 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                         self.logger.warning(f"Device Read, Response, Not found the request, Id: {read_resp_id}, Message:\n{read_raw}")
                         continue
                     read_resp_callable(read_as_json)
+                elif read_type == MessageTypes.RespError.value:  # The middleware rejected a request we sent
+                    if len(read_as_json) < 2:
+                        self.logger.warning(f"Device Read, Response Error, Invalid, Message:\n{read_raw}")
+                        continue
+                    read_resp_id = str(read_as_json[1])
+                    self.logger.error(f"Device Read, Response Error, Id: {read_resp_id}, Message:\n{read_raw}")
+                    read_resp_callable = self.__pending_by_device_reqs.pop(read_resp_id, None)
+                    if read_resp_callable is None:
+                        self.logger.warning(f"Device Read, Response Error, Not found the request, Id: {read_resp_id}")
+                        continue
+                    # Resolve as None so the waiting action reports failure
+                    # rather than blocking until the response timeout.
+                    read_resp_callable(None)
                 else:
                     self.logger.debug(f"Device Read, Type Unknown, Message:\n{read_raw}")
         except asyncio.CancelledError:
@@ -314,7 +341,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 resp_payload = {
                     "status": "Accepted"
                 }
-                next_async_task = await self.action_heart_beat()
+                next_async_task = self.action_heart_beat()
             if req_payload["requestedMessage"] == "StatusNotification":
                 options = {
                     "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
@@ -323,15 +350,17 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                     "status": "Accepted"
                 }
                 if self.charge_in_progress:
-                    next_async_task = await self.action_status_update("Charging", options)
+                    next_async_task = self.action_status_update("Charging", options)
                 else:
-                    next_async_task = await self.action_status_update("Available", options)
+                    next_async_task = self.action_status_update("Available", options)
         if req_action == "RemoteStartTransaction".lower():
             if not self.charge_can_start():
                 resp_payload["status"] = "Rejected"
             else:
                 options = {
-                    "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
+                    # connectorId 0 addresses the charge point as a whole and
+                    # is not a valid transaction target; fall back to 1.
+                    "connectorId": req_payload.get("connectorId") or 1,
                     "idTag": req_payload["idTag"] if "idTag" in req_payload else "-",
                 }
                 self.logger.info(f"Device, Read, Request, RemoteStart, Options: {json.dumps(options)}")

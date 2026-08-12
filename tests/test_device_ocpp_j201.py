@@ -1,6 +1,13 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+@pytest.fixture
+def no_sleep():
+    """flow_charge waits out a fixed cool-down after the meter loop; skip it."""
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        yield
 
 
 def _stub_authorize_response(id_tag: str, group_id_tag: str = None):
@@ -156,3 +163,101 @@ class TestJ201FlowReserveStatusPayload:
         assert ok is True
         assert captured["StatusNotification"]["connectorStatus"] == "Reserved"
         assert captured["StatusNotification"]["evseId"] == 1
+
+
+class TestJ201TransactionEventEndedConfHandling:
+    """idTokenInfo is optional in TransactionEventResponse and concerns the
+    token, not whether the Ended event was registered — an empty payload is
+    the common success response and used to raise KeyError."""
+
+    def _options(self):
+        return {"connectorId": 1, "idTag": "X", "meterStart": 1000,
+                "meterStop": 2000, "chargeStopTime": "2025-01-15T12:30:00+00:00"}
+
+    @pytest.mark.asyncio
+    async def test_empty_response_is_a_successful_stop(self, device_ocpp_j201):
+        device_ocpp_j201.charge_id = "txn-1"
+        device_ocpp_j201.by_device_req_send = AsyncMock(return_value=[3, "r", {}])
+
+        ok = await device_ocpp_j201.action_charge_stop(self._options())
+
+        assert ok is True
+        assert device_ocpp_j201.charge_id == -1
+
+    @pytest.mark.asyncio
+    async def test_non_accepted_id_token_info_still_stops(self, device_ocpp_j201):
+        device_ocpp_j201.charge_id = "txn-1"
+        device_ocpp_j201.by_device_req_send = AsyncMock(
+            return_value=[3, "r", {"idTokenInfo": {"status": "Blocked"}}])
+
+        ok = await device_ocpp_j201.action_charge_stop(self._options())
+
+        assert ok is True
+        assert device_ocpp_j201.charge_id == -1
+
+    @pytest.mark.asyncio
+    async def test_timeout_or_call_error_still_fails(self, device_ocpp_j201):
+        """The id must clear even when the response never arrives — there is
+        no retry path, and a kept UUID would replay into later triggered
+        meter values."""
+        device_ocpp_j201.error_exit = False
+        device_ocpp_j201.charge_id = "txn-1"
+        device_ocpp_j201.by_device_req_send = AsyncMock(return_value=None)
+
+        ok = await device_ocpp_j201.action_charge_stop(self._options())
+
+        assert ok is False
+        assert device_ocpp_j201.charge_id == -1
+
+
+class TestJ201NoStaleTransactionId:
+    """TransactionEvent Updated must reference an open transaction. Before the
+    charge_id reset, a triggered MeterValues after a completed session sent an
+    Updated event carrying the previous transaction's UUID."""
+
+    @pytest.mark.asyncio
+    async def test_idle_meter_value_sends_nothing(self, device_ocpp_j201):
+        device_ocpp_j201.by_device_req_send = AsyncMock()
+
+        ok = await device_ocpp_j201.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert ok is True
+        device_ocpp_j201.by_device_req_send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_meter_value_during_transaction_still_sends(self, device_ocpp_j201):
+        captured = {}
+
+        async def fake_send(action, payload):
+            captured[action] = payload
+            return [3, "r", {}]
+
+        device_ocpp_j201.by_device_req_send = AsyncMock(side_effect=fake_send)
+        device_ocpp_j201.charge_id = "txn-1"
+
+        ok = await device_ocpp_j201.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert ok is True
+        assert captured["TransactionEvent"]["transactionInfo"]["transactionId"] == "txn-1"
+
+    @pytest.mark.asyncio
+    async def test_no_stale_transaction_id_after_completed_session(
+            self, device_ocpp_j201, no_sleep):
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload))
+            return [3, "req-1", {"idTokenInfo": {"status": "Accepted"}}]
+
+        device_ocpp_j201.by_device_req_send = AsyncMock(side_effect=fake_send)
+
+        assert await device_ocpp_j201.flow_charge(True, {
+            "connectorId": 1, "idTag": "X",
+            "autoActionsLoopDelayInSeconds": 0, "autoActionsLoopCount": 1,
+        }) is True
+        assert device_ocpp_j201.charge_id == -1
+
+        sent.clear()
+        await device_ocpp_j201.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert sent == []

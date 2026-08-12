@@ -121,11 +121,12 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
         conenctor_id = options.get("connectorId", 1)
         json_payload = {
             "connectorId": conenctor_id,
-            "transactionId": self.charge_id,
             "meterValue": [{
                 "timestamp": time_stamp if time_stamp else self.utcnow_iso(),
+                # OCPP 1.6J types sampledValue.value as a string; sending a
+                # bare number makes schema-validating backends drop the sample.
                 "sampledValue": [{
-                    "value": meter_value if meter_value else self.charge_meter_value_current(options),
+                    "value": str(meter_value if meter_value is not None else self.charge_meter_value_current(options)),
                     "context": "Sample.Periodic",
                     "measurand": "Energy.Active.Import.Register",
                     "location": "Outlet",
@@ -133,6 +134,11 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
                 }]
             }]
         }
+        # transactionId is optional and only meaningful while a transaction is
+        # open; outside one charge_id holds -1 or the previous session's id,
+        # which schema-strict backends reject or misattribute.
+        if self.charge_id != -1:
+            json_payload["transactionId"] = self.charge_id
         resp_json = await self.by_device_req_send(action, json_payload)
         if resp_json is None:
             return False
@@ -150,14 +156,44 @@ class DeviceOcppJ16(AbstractDeviceOcppJ):
             "transactionId": self.charge_id,
             "meterStop": options["meterStop"],
             "idTag": id_tag,
-            "reason": options.get("stopReason", "Local")
+            "reason": options.get("stopReason", "Local"),
+            # Backends build the CDR from the closing register reading; without
+            # a Transaction.End sample some cannot price the session and leave
+            # it closed-but-unbilled.
+            "transactionData": [{
+                "timestamp": options["chargeStopTime"],
+                "sampledValue": [{
+                    "value": str(options["meterStop"]),
+                    "context": "Transaction.End",
+                    "measurand": "Energy.Active.Import.Register",
+                    "location": "Outlet",
+                    "unit": "Wh"
+                }]
+            }]
         }
-        resp_json = await self.by_device_req_send(action, json_payload)
-        if resp_json is None or len(resp_json) != 3 or resp_json[2][key_name]['status'] != 'Accepted':
+        try:
+            resp_json = await self.by_device_req_send(action, json_payload)
+        finally:
+            # The local transaction context is dead once a stop has been
+            # attempted, whatever the conf says — there is no retry path, and
+            # a kept id would let a later triggered MeterValues re-attach the
+            # dead transaction.
+            self.charge_id = -1
+        if resp_json is None or len(resp_json) != 3 or not isinstance(resp_json[2], dict):
             await self.handle_error(
                 f"Action {action} Response Failed:\n{json.dumps(resp_json)}",
                 ErrorReasons.InvalidResponse)
             return False
+        # idTagInfo is optional in StopTransaction.conf, and its status is
+        # authorization info about the idTag (e.g. Blocked for future use) —
+        # not whether the stop was registered. The CSMS closes the transaction
+        # the moment it answers the CALL, so any valid CALLRESULT is a
+        # successful stop; treating `[3, id, {}]` as failure crashed the flow
+        # and skipped the closing Available status.
+        id_tag_info = resp_json[2].get(key_name)
+        if id_tag_info is not None and id_tag_info.get('status') != 'Accepted':
+            self.logger.warning(
+                f"Action {action} idTagInfo status not Accepted (transaction still stopped):\n{json.dumps(id_tag_info)}")
         self.logger.info(f"Action {action} End")
         return True
 
