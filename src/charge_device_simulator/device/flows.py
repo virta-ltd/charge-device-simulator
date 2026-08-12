@@ -5,4 +5,4 @@ class Flows(Enum):
     Heartbeat = 'heartbeat'
     Authorize = 'authorize'
     Charge = 'charge'
-    Preparing = 'preparing'
+    StatusPreparing = 'status_preparing'

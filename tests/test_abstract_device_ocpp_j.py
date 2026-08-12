@@ -120,8 +120,8 @@ class TestChargeMeterValueCurrent:
         assert second_result > first_result
 
 
-class TestFlowAutoPreparing:
-    """Tests for the flow_preparing method."""
+class TestFlowStatusPreparing:
+    """Tests for the flow_status_preparing method."""
 
     @pytest.mark.asyncio
     async def test_skips_status_update_when_charge_in_progress(self, ocpp_j_device):
@@ -129,7 +129,7 @@ class TestFlowAutoPreparing:
         ocpp_j_device.charge_in_progress = True
         ocpp_j_device.is_preparing = False
 
-        result = await ocpp_j_device.flow_preparing()
+        result = await ocpp_j_device.flow_status_preparing()
 
         assert result is True
         assert ocpp_j_device.is_preparing is False
@@ -140,7 +140,7 @@ class TestFlowAutoPreparing:
         ocpp_j_device.charge_in_progress = False
         ocpp_j_device.is_preparing = False
 
-        result = await ocpp_j_device.flow_preparing()
+        result = await ocpp_j_device.flow_status_preparing()
 
         assert result is True
         assert ocpp_j_device.is_preparing is True
@@ -154,7 +154,7 @@ class TestFlowAutoPreparing:
             return False
         ocpp_j_device.action_status_update = fail_status
 
-        result = await ocpp_j_device.flow_preparing()
+        result = await ocpp_j_device.flow_status_preparing()
 
         assert result is False
         assert ocpp_j_device.is_preparing is False

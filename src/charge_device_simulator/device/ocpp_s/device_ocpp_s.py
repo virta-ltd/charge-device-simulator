@@ -299,8 +299,8 @@ class DeviceOcppS(DeviceAbstract):
         self.logger.info(f"Flow {log_title} End")
         return True
 
-    async def flow_preparing(self) -> bool:
-        log_title = self.flow_preparing.__name__
+    async def flow_status_preparing(self) -> bool:
+        log_title = self.flow_status_preparing.__name__
         self.logger.info(f"Flow {log_title} Start")
         if self.charge_in_progress:
             self.logger.info(f"Flow {log_title} Skipped, charge in progress")

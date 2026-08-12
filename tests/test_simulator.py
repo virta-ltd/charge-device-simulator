@@ -15,7 +15,7 @@ def mock_device():
     device.flow_authorize = AsyncMock(return_value=True)
     device.flow_charge = AsyncMock(return_value=True)
     device.flow_heartbeat = AsyncMock(return_value=True)
-    device.flow_preparing = AsyncMock(return_value=True)
+    device.flow_status_preparing = AsyncMock(return_value=True)
     device.re_initialize = AsyncMock(return_value=True)
     device.on_error = []
     return device
@@ -87,13 +87,13 @@ class TestSimulatorFlowOptionsPassedAsDict:
         mock_device.flow_authorize.assert_called_once_with(simulator.flow_charge_options)
 
     @pytest.mark.asyncio
-    async def test_frequent_flow_preparing(self, simulator, mock_device):
+    async def test_frequent_flow_status_preparing(self, simulator, mock_device):
         """Test that frequent flow preparing dispatches correctly."""
         simulator.frequent_flows = {
-            Flows.Preparing: FrequentFlowOptions(delay_seconds=0, count=1)
+            Flows.StatusPreparing: FrequentFlowOptions(delay_seconds=0, count=1)
         }
         await simulator.loop_flow_frequent()
-        mock_device.flow_preparing.assert_called_once()
+        mock_device.flow_status_preparing.assert_called_once()
 
 
 class TestSimulatorOptionsPersistence:

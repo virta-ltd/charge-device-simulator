@@ -115,7 +115,7 @@ class DeviceAbstract(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def flow_preparing(self) -> bool:
+    async def flow_status_preparing(self) -> bool:
         pass
 
     @abc.abstractmethod
