@@ -108,14 +108,11 @@ class Simulator:
 
     async def lifecycle_start(self):
         # Interactive sessions should drop back to the menu on a rejected
-        # response instead of sys.exit'ing the process, and need a few UX-only
-        # tweaks gated by `interactive_mode` (e.g. per-cycle option resets).
-        # Toggled here (rather than in initialize) so callers can flip
-        # is_interactive after initialize() completes; common pattern in
-        # play_ground.py.
+        # response instead of sys.exit'ing the process. Toggled here (rather
+        # than in initialize) so callers can flip is_interactive after
+        # initialize() completes; common pattern in play_ground.py.
         if self.is_interactive:
             self.device.error_exit = False
-            self.device.interactive_mode = True
         tasks = []
         if self.is_interactive:
             tasks.append(self.loop_interactive())

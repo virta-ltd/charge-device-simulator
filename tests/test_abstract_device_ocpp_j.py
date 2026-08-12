@@ -389,10 +389,9 @@ class TestConsumeReservationIfUsed:
 
 
 class TestResetChargeCycleOptions:
-    """A second `flow_charge` invocation in an interactive session must not
-    replay the previous cycle's start/stop time or computed meterStop. The
-    same reset must NOT happen in non-interactive (frequent-flow) runs to
-    preserve historical behavior."""
+    """Every `flow_charge` invocation must start a fresh cycle: replaying the
+    previous cycle's start/stop time or meterStop produces overlapping
+    transactions whose stop reading contradicts the periodic meter values."""
 
     def _stale_options(self):
         return {
@@ -404,8 +403,7 @@ class TestResetChargeCycleOptions:
             "meterStart": 1000,
         }
 
-    def test_drops_stale_charge_cycle_keys_when_interactive(self, ocpp_j_device):
-        ocpp_j_device.interactive_mode = True
+    def test_drops_stale_charge_cycle_keys(self, ocpp_j_device):
         options = self._stale_options()
 
         ocpp_j_device._reset_charge_cycle_options(options)
@@ -413,17 +411,24 @@ class TestResetChargeCycleOptions:
         assert "chargeStartTime" not in options
         assert "chargeStopTime" not in options
         assert "meterStop" not in options
-        # Caller-supplied config (idTag, connectorId, meterStart) is untouched
-        assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
+        assert options["idTag"] == "ABC"
+        assert options["connectorId"] == 1
 
-    def test_keeps_options_when_not_interactive(self, ocpp_j_device):
-        # Default (interactive_mode=False) — frequent-flow / non-interactive run
+    def test_carries_previous_meter_stop_into_meter_start(self, ocpp_j_device):
+        """The energy register never rewinds between sessions on real hardware."""
         options = self._stale_options()
-        snapshot = dict(options)
 
         ocpp_j_device._reset_charge_cycle_options(options)
 
-        assert options == snapshot
+        assert options["meterStart"] == 31000
+
+    def test_keeps_meter_start_on_first_cycle(self, ocpp_j_device):
+        """No previous cycle (no meterStop) leaves the configured start alone."""
+        options = {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
 
 
 class TestInteractiveReservationHandlers:

@@ -1,6 +1,13 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+@pytest.fixture
+def no_sleep():
+    """flow_charge waits out a fixed cool-down after the meter loop; skip it."""
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        yield
 
 
 def _stub_authorize_response(id_tag: str, parent_id_tag: str = None):
@@ -120,6 +127,48 @@ class TestJ16FlowChargeReservationGate:
         assert "StatusNotification" not in sent
         # Reservation preserved
         assert device_ocpp_j16.reservation_is_active()
+
+
+class TestJ16ChargeCycleIsolation:
+    """The regression behind Virta sessions staying CLOSED: consecutive
+    frequent-flow charges shared one options dict, so every cycle after the
+    first replayed the first cycle's start time and meterStop."""
+
+    @pytest.mark.asyncio
+    async def test_second_cycle_sends_fresh_start_and_stop(self, device_ocpp_j16, no_sleep):
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload))
+            if action == "StartTransaction":
+                return _stub_start_transaction_response()
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+        # Shared dict, exactly as Simulator.loop_flow_frequent passes it
+        options = {
+            "connectorId": 1,
+            "idTag": "X",
+            "autoActionsLoopDelayInSeconds": 0,
+            "autoActionsLoopCount": 1,
+        }
+
+        await device_ocpp_j16.flow_charge(True, options)
+        first_start = [p for a, p in sent if a == "StartTransaction"][0]
+        first_stop = [p for a, p in sent if a == "StopTransaction"][0]
+
+        sent.clear()
+        await device_ocpp_j16.flow_charge(True, options)
+        second_start = [p for a, p in sent if a == "StartTransaction"][0]
+        second_stop = [p for a, p in sent if a == "StopTransaction"][0]
+
+        # Each cycle declares its own time window
+        assert second_start["timestamp"] != first_start["timestamp"]
+        assert second_stop["timestamp"] != first_stop["timestamp"]
+        # The second cycle starts where the first stopped — a real energy
+        # register never rewinds
+        assert second_start["meterStart"] == first_stop["meterStop"]
+        assert second_stop["meterStop"] >= second_start["meterStart"]
 
 
 class TestJ16FlowReserveStatusPayload:

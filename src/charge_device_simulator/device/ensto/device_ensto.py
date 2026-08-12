@@ -232,6 +232,7 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
     async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
+        self._reset_charge_cycle_options(options)
         if not options.get("is_remote_started", False):
             if not await self.action_authorize(options):
                 self.charge_in_progress = False
