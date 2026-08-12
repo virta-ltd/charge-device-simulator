@@ -369,6 +369,33 @@ class TestPreChargeReservationGate:
         assert ocpp_j_device._pre_charge_reservation_gate(options) is False
         assert "reservationId" not in options
 
+    def test_connector_zero_reservation_blocks_wrong_tag_on_any_connector(self, ocpp_j_device):
+        # OCPP 1.6: connectorId 0 in ReserveNow reserves the charge point as
+        # a whole, so the gate must apply it to whichever connector the
+        # charge requests.
+        _seed_reservation(ocpp_j_device, reservation_id=20, connector_id=0, id_tag="OWNER")
+        options = {"connectorId": 1, "idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+        assert "reservationId" not in options
+
+    def test_connector_zero_reservation_blocks_wrong_tag_when_connector_id_missing(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=21, connector_id=0, id_tag="OWNER")
+        options = {"idTag": "INTRUDER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is False
+        assert "reservationId" not in options
+
+    def test_connector_zero_reservation_matching_tag_injects_reservation_id(self, ocpp_j_device):
+        _seed_reservation(ocpp_j_device, reservation_id=22, connector_id=0, id_tag="OWNER")
+        options = {"connectorId": 1, "idTag": "OWNER"}
+
+        assert ocpp_j_device._pre_charge_reservation_gate(options) is True
+        assert options["reservationId"] == 22
+        # The requested connector still goes out in the start payload; the
+        # gate must not rewrite it to the reservation's connector 0.
+        assert options["connectorId"] == 1
+
 
 class TestConsumeReservationIfUsed:
     def test_clears_when_reservation_id_in_options_matches(self, ocpp_j_device):

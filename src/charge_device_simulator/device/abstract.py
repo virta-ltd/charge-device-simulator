@@ -202,15 +202,18 @@ class DeviceAbstract(abc.ABC):
         self.reservation_expiry_date = None
 
     def _pre_charge_reservation_gate(self, options: typing.Dict[str, typing.Any]) -> bool:
-        """If the connector has an active reservation, validate the most recent
-        authorize info against it (direct idTag or parent/group match). On match,
-        injects reservationId into options so the start payload carries it."""
+        """If an active reservation covers the requested connector — stored on
+        that connector, or on connector 0, which in OCPP 1.6 reserves the
+        charge point as a whole and so applies to every connector — validate
+        the most recent authorize info against it (direct idTag or
+        parent/group match). On match, injects reservationId into options so
+        the start payload carries it."""
         # Mirror action_charge_start's default — a missing connectorId would
         # otherwise compare None against the stored connector and silently
         # skip the gate (letting a non-matching tag through on a reserved
         # connector).
         connector_id = options.get("connectorId", 1)
-        if not self.reservation_is_active() or self.reservation_connector_id != connector_id:
+        if not self.reservation_is_active() or self.reservation_connector_id not in (0, connector_id):
             return True
         requested_id_tag = options.get("idTag")
         if requested_id_tag is not None and requested_id_tag == self.reservation_id_tag:
