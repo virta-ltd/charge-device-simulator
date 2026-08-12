@@ -782,6 +782,47 @@ class TestCallErrorAndTimeoutAreFailures:
         assert ok is False
 
 
+class TestTriggerMessageDoesNotBlockReader:
+    """The TriggerMessage branches must schedule the resulting action as a
+    task, not await it inline: by_middleware_req runs inside the websocket
+    read loop, and the action's own response can only be delivered by that
+    same loop — awaiting deadlocks until the response timeout, after which
+    asyncio.create_task(False) raises TypeError and kills the reader."""
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_trigger_schedules_action_as_task(self, ocpp_j_device):
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+        ocpp_j_device.action_heart_beat = AsyncMock(return_value=True)
+
+        await ocpp_j_device.by_middleware_req(
+            "req1", "triggermessage", {"requestedMessage": "Heartbeat"})
+
+        # The handler must return without having awaited the action inline...
+        ocpp_j_device.action_heart_beat.assert_not_awaited()
+        resp = ocpp_j_device.by_middleware_req_response_ready.await_args.args[1]
+        assert resp == {"status": "Accepted"}
+        # ...and the scheduled task runs once the loop gets control back.
+        await asyncio.sleep(0)
+        ocpp_j_device.action_heart_beat.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_status_trigger_schedules_action_as_task(self, ocpp_j_device):
+        ocpp_j_device.by_middleware_req_response_ready = AsyncMock()
+        ocpp_j_device.action_status_update = AsyncMock(return_value=True)
+        ocpp_j_device.charge_in_progress = True
+
+        await ocpp_j_device.by_middleware_req(
+            "req1", "triggermessage",
+            {"requestedMessage": "StatusNotification", "connectorId": 2})
+
+        ocpp_j_device.action_status_update.assert_not_awaited()
+        await asyncio.sleep(0)
+        ocpp_j_device.action_status_update.assert_awaited_once()
+        args = ocpp_j_device.action_status_update.await_args.args
+        assert args[0] == "Charging"
+        assert args[1]["connectorId"] == 2
+
+
 class TestInboundReserveNowCancelReservation:
     """Tests for the by_middleware_req routing of ReserveNow / CancelReservation.
 

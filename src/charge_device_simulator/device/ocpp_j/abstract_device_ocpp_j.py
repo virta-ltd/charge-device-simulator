@@ -341,7 +341,7 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                 resp_payload = {
                     "status": "Accepted"
                 }
-                next_async_task = await self.action_heart_beat()
+                next_async_task = self.action_heart_beat()
             if req_payload["requestedMessage"] == "StatusNotification":
                 options = {
                     "connectorId": req_payload["connectorId"] if "connectorId" in req_payload else 0,
@@ -350,9 +350,9 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                     "status": "Accepted"
                 }
                 if self.charge_in_progress:
-                    next_async_task = await self.action_status_update("Charging", options)
+                    next_async_task = self.action_status_update("Charging", options)
                 else:
-                    next_async_task = await self.action_status_update("Available", options)
+                    next_async_task = self.action_status_update("Available", options)
         if req_action == "RemoteStartTransaction".lower():
             if not self.charge_can_start():
                 resp_payload["status"] = "Rejected"
