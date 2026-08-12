@@ -253,6 +253,19 @@ class AbstractDeviceOcppJ(DeviceAbstract):
                         self.logger.warning(f"Device Read, Response, Not found the request, Id: {read_resp_id}, Message:\n{read_raw}")
                         continue
                     read_resp_callable(read_as_json)
+                elif read_type == MessageTypes.RespError.value:  # The middleware rejected a request we sent
+                    if len(read_as_json) < 2:
+                        self.logger.warning(f"Device Read, Response Error, Invalid, Message:\n{read_raw}")
+                        continue
+                    read_resp_id = str(read_as_json[1])
+                    self.logger.error(f"Device Read, Response Error, Id: {read_resp_id}, Message:\n{read_raw}")
+                    read_resp_callable = self.__pending_by_device_reqs.pop(read_resp_id, None)
+                    if read_resp_callable is None:
+                        self.logger.warning(f"Device Read, Response Error, Not found the request, Id: {read_resp_id}")
+                        continue
+                    # Resolve as None so the waiting action reports failure
+                    # rather than blocking until the response timeout.
+                    read_resp_callable(None)
                 else:
                     self.logger.debug(f"Device Read, Type Unknown, Message:\n{read_raw}")
         except asyncio.CancelledError:

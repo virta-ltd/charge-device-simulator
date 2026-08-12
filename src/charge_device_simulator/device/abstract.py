@@ -65,8 +65,12 @@ class DeviceAbstract(abc.ABC):
             return False
         pass
 
-    def by_device_req_resp_timeout(self) -> str:
-        return f'"response timeout, {self.response_timeout_seconds} seconds passed"'
+    def by_device_req_resp_timeout(self) -> None:
+        # None makes callers treat the timeout as a failed request; anything
+        # truthy would let actions that only check `is None` log success for
+        # a request the middleware never answered.
+        self.logger.warning(f"Response timeout, {self.response_timeout_seconds} seconds passed")
+        return None
 
     @abc.abstractmethod
     async def action_register(self) -> bool:

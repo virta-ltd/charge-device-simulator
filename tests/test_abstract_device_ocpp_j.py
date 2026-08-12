@@ -1,4 +1,6 @@
+import asyncio
 import datetime
+import json
 import math
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -502,6 +504,88 @@ class TestInteractiveReservationHandlers:
             await ocpp_j_device.interactive_reservation_cancel()
 
         ocpp_j_device.flow_reservation_cancel.assert_awaited_once_with(999)
+
+
+class TestCallErrorAndTimeoutAreFailures:
+    """A CALLERROR (message type 4) used to fall through to the "Type Unknown"
+    branch, leaving the request to time out; the timeout in turn returned a
+    truthy string, so actions that only check `is None` logged success for
+    messages the middleware had rejected."""
+
+    def _pending(self, device):
+        return device._AbstractDeviceOcppJ__pending_by_device_reqs
+
+    async def _run_with_inbound(self, device, frame_for):
+        """Send one request while a reader loop answers it with `frame_for(req_id)`."""
+        device.response_timeout_seconds = 5
+        sent = asyncio.Event()
+        device._ws = MagicMock()
+        device._ws.send = AsyncMock(side_effect=lambda raw: sent.set())
+
+        answered = False
+
+        async def fake_recv():
+            nonlocal answered
+            await sent.wait()
+            if answered:
+                await asyncio.Event().wait()  # nothing more to deliver
+            answered = True
+            return frame_for(next(iter(self._pending(device))))
+
+        device._ws.recv = AsyncMock(side_effect=fake_recv)
+        loop_task = asyncio.create_task(
+            device._AbstractDeviceOcppJ__loop_internal())
+        try:
+            return await device.by_device_req_send("Heartbeat", {})
+        finally:
+            loop_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_call_error_resolves_request_as_none(self, ocpp_j_device):
+        result = await self._run_with_inbound(
+            ocpp_j_device,
+            lambda req_id: json.dumps(
+                [4, req_id, "SecurityError", "Rejected by CSMS", {}]),
+        )
+
+        assert result is None
+        # The pending entry is cleared, not left to leak until timeout
+        assert self._pending(ocpp_j_device) == {}
+
+    @pytest.mark.asyncio
+    async def test_call_result_still_resolves_normally(self, ocpp_j_device):
+        result = await self._run_with_inbound(
+            ocpp_j_device,
+            lambda req_id: json.dumps([3, req_id, {"currentTime": "now"}]),
+        )
+
+        assert result is not None
+        assert result[2] == {"currentTime": "now"}
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_none(self, ocpp_j_device):
+        ocpp_j_device.response_timeout_seconds = 0
+        ocpp_j_device._ws = MagicMock()
+        ocpp_j_device._ws.send = AsyncMock()
+
+        assert await ocpp_j_device.by_device_req_send("Heartbeat", {}) is None
+
+    @pytest.mark.asyncio
+    async def test_meter_values_reports_failure_on_timeout(self, device_ocpp_j16):
+        """The action must not log success for an unanswered request."""
+        device_ocpp_j16.response_timeout_seconds = 0
+
+        ok = await device_ocpp_j16.action_meter_value({"connectorId": 1}, meter_value=100)
+
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_status_notification_reports_failure_on_timeout(self, device_ocpp_j16):
+        device_ocpp_j16.response_timeout_seconds = 0
+
+        ok = await device_ocpp_j16.action_status_update("Charging", {"connectorId": 1})
+
+        assert ok is False
 
 
 class TestInboundReserveNowCancelReservation:
