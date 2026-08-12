@@ -180,23 +180,19 @@ class AbstractDeviceOcppJ(DeviceAbstract):
             self.charge_in_progress = False
             return False
         self._consume_reservation_if_used(options)
-        if not await self.action_status_update("Charging", options):
-            self.charge_in_progress = False
-            return False
-        if not await self.flow_charge_ongoing_loop(auto_stop, options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Finishing", options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_charge_stop(options):
-            self.charge_in_progress = False
-            return False
-        if not await self.action_status_update("Available", options):
-            self.charge_in_progress = False
+        # The backend opened a transaction at StartTransaction; from here on a
+        # failed step must not skip StopTransaction, or the session is left
+        # open server-side (never billed/completed) while charge_can_stop
+        # rejects any later RemoteStopTransaction.
+        ok = await self.action_status_update("Charging", options)
+        ok = await self.flow_charge_ongoing_loop(auto_stop, options) and ok
+        ok = await self.action_status_update("Finishing", options) and ok
+        ok = await self.action_charge_stop(options) and ok
+        ok = await self.action_status_update("Available", options) and ok
+        self.charge_in_progress = False
+        if not ok:
             return False
         self.logger.info(f"Flow {log_title} End")
-        self.charge_in_progress = False
         return True
 
     async def flow_charge_ongoing_actions(self, options: dict) -> bool:

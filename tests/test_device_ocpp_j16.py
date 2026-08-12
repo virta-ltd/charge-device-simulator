@@ -255,6 +255,68 @@ class TestJ16ChargeCycleIsolation:
         assert statuses[:2] == ["Preparing", "Charging"]
 
 
+class TestJ16MidFlowFailureStillStops:
+    """Once StartTransaction is accepted the backend holds an open session; a
+    mid-flow failure (timeouts and CALLERRORs resolve to None) must still send
+    StopTransaction, or the session is orphaned server-side — stuck open and
+    never billed — while RemoteStopTransaction gets rejected because
+    charge_in_progress was already cleared."""
+
+    async def _run_flow(self, device, fail_when):
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload))
+            if fail_when(action, payload):
+                return None  # what a timeout or CALLERROR resolves to
+            if action == "StartTransaction":
+                return _stub_start_transaction_response()
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device.by_device_req_send = AsyncMock(side_effect=fake_send)
+        ok = await device.flow_charge(True, {
+            "connectorId": 1, "idTag": "X",
+            "autoActionsLoopDelayInSeconds": 0, "autoActionsLoopCount": 1,
+        })
+        return ok, [a for a, _ in sent]
+
+    @pytest.mark.asyncio
+    async def test_charging_status_failure_still_sends_stop(self, device_ocpp_j16, no_sleep):
+        ok, actions = await self._run_flow(
+            device_ocpp_j16,
+            lambda a, p: a == "StatusNotification" and p.get("status") == "Charging")
+
+        assert ok is False
+        assert "StopTransaction" in actions
+        assert device_ocpp_j16.charge_in_progress is False
+
+    @pytest.mark.asyncio
+    async def test_meter_values_failure_still_sends_stop(self, device_ocpp_j16, no_sleep):
+        ok, actions = await self._run_flow(
+            device_ocpp_j16, lambda a, p: a == "MeterValues")
+
+        assert ok is False
+        assert "StopTransaction" in actions
+
+    @pytest.mark.asyncio
+    async def test_finishing_status_failure_still_sends_stop(self, device_ocpp_j16, no_sleep):
+        ok, actions = await self._run_flow(
+            device_ocpp_j16,
+            lambda a, p: a == "StatusNotification" and p.get("status") == "Finishing")
+
+        assert ok is False
+        assert "StopTransaction" in actions
+
+    @pytest.mark.asyncio
+    async def test_no_stop_when_start_transaction_never_succeeded(self, device_ocpp_j16, no_sleep):
+        device_ocpp_j16.error_exit = False
+        ok, actions = await self._run_flow(
+            device_ocpp_j16, lambda a, p: a == "StartTransaction")
+
+        assert ok is False
+        assert "StopTransaction" not in actions
+
+
 class TestJ16FlowReserveStatusPayload:
     @pytest.mark.asyncio
     async def test_reserved_status_uses_1_6_status_field(self, device_ocpp_j16):
