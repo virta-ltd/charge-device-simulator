@@ -317,6 +317,47 @@ class TestJ16MidFlowFailureStillStops:
         assert "StopTransaction" not in actions
 
 
+class TestJ16ScriptedMeterValuesFlow:
+    @pytest.mark.asyncio
+    async def test_stop_repeats_last_scripted_sample_across_cycles(self, device_ocpp_j16, no_sleep):
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload))
+            if action == "StartTransaction":
+                return _stub_start_transaction_response()
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+        options = {
+            "connectorId": 1, "idTag": "X", "meterStart": 1000,
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "2025-01-15T12:10:00+00:00",
+                 "secondsToSleep": 0},
+                {"meterValue": 2000, "timestamp": "2025-01-15T12:20:00+00:00",
+                 "secondsToSleep": 0},
+            ],
+        }
+
+        await device_ocpp_j16.flow_charge(True, options)
+        first_stop = [p for a, p in sent if a == "StopTransaction"][0]
+
+        sent.clear()
+        await device_ocpp_j16.flow_charge(True, options)
+        second_start = [p for a, p in sent if a == "StartTransaction"][0]
+        second_stop = [p for a, p in sent if a == "StopTransaction"][0]
+
+        # The stop reading repeats the script's final register value, in both
+        # meterStop and the Transaction.End sample
+        assert first_stop["meterStop"] == 2000
+        assert first_stop["transactionData"][0]["sampledValue"][0]["value"] == "2000"
+        # The script replays identically each cycle: meterStart stays at the
+        # configured value instead of carrying the previous stop above the
+        # replayed samples
+        assert second_start["meterStart"] == 1000
+        assert second_stop["meterStop"] == 2000
+
+
 class TestJ16FlowReserveStatusPayload:
     @pytest.mark.asyncio
     async def test_reserved_status_uses_1_6_status_field(self, device_ocpp_j16):

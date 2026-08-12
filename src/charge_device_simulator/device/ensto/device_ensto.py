@@ -145,7 +145,9 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
         if "chargeStopTime" not in options:
             options["chargeStopTime"] = self.utcnow_iso()
         if "meterStop" not in options:
-            options["meterStop"] = self.charge_meter_value_current(options)
+            scripted_final = self._scripted_final_meter_value(options)
+            options["meterStop"] = (scripted_final if scripted_final is not None
+                                    else self.charge_meter_value_current(options))
 
     async def action_charge_start(self, options: dict) -> bool:
         action = "charge_start"

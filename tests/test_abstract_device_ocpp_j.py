@@ -432,6 +432,57 @@ class TestResetChargeCycleOptions:
 
         assert options == {"idTag": "ABC", "connectorId": 1, "meterStart": 1000}
 
+    def test_scripted_meter_values_keep_configured_meter_start(self, ocpp_j_device):
+        """Scripted registers are absolute and replay identically each cycle;
+        carrying the previous stop into meterStart would put it above the
+        replayed samples — a register rewind."""
+        options = {
+            "meterStart": 1000,
+            "meterStop": 2000,
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 2000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert options["meterStart"] == 1000
+        assert "meterStop" not in options
+
+
+class TestScriptedMeterValuesStopReading:
+    """The stop reading must repeat the script's final register value; a
+    wall-clock-computed meterStop contradicts the samples already sent and
+    makes the session unbillable."""
+
+    def test_meter_stop_defaults_to_last_scripted_value(self, ocpp_j_device):
+        options = {
+            "meterStart": 1000,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 2000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 2000
+
+    def test_explicit_meter_stop_still_wins_over_script(self, ocpp_j_device):
+        options = {
+            "meterStop": 9999,
+            "chargeStopTime": "2025-01-15T12:30:00+00:00",
+            "meterValues": [
+                {"meterValue": 2000, "timestamp": "t", "secondsToSleep": 0},
+            ],
+        }
+
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 9999
+
 
 class TestInteractiveReservationHandlers:
     @pytest.mark.asyncio

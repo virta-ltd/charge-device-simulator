@@ -227,6 +227,18 @@ class DeviceAbstract(abc.ABC):
             f"{self.reservation_id} on connector {connector_id}")
         return False
 
+    @staticmethod
+    def _scripted_final_meter_value(options: typing.Dict[str, typing.Any]) -> typing.Optional[int]:
+        """Last register reading of a scripted meterValues list, if one is
+        configured. The stop reading must repeat it — a meterStop computed
+        from wall-clock time would contradict the samples already sent."""
+        meter_values = options.get("meterValues")
+        if isinstance(meter_values, list) and meter_values:
+            last = meter_values[-1]
+            if isinstance(last, dict) and "meterValue" in last:
+                return last["meterValue"]
+        return None
+
     def _reset_charge_cycle_options(self, options: typing.Dict[str, typing.Any]) -> None:
         """Drop per-cycle ephemeral keys so every flow_charge run picks up
         fresh start/stop timestamps and a recomputed meterStop. The options
@@ -236,8 +248,12 @@ class DeviceAbstract(abc.ABC):
         overlapping transactions whose meterStop contradicts the periodic
         meter values, which billing backends reject. The previous cycle's
         meterStop is carried into meterStart so the energy register stays
-        monotonic like a real meter."""
-        if "meterStop" in options:
+        monotonic like a real meter — except when a scripted meterValues list
+        is configured: its readings are absolute and replay identically each
+        cycle, so carrying the stop forward would put meterStart above the
+        replayed samples (a register rewind); the configured meterStart is
+        kept instead."""
+        if "meterStop" in options and self._scripted_final_meter_value(options) is None:
             options["meterStart"] = options["meterStop"]
         for key in ("chargeStartTime", "chargeStopTime", "meterStop"):
             options.pop(key, None)
