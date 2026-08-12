@@ -569,6 +569,43 @@ class TestCallErrorAndTimeoutAreFailures:
         ocpp_j_device._ws.send = AsyncMock()
 
         assert await ocpp_j_device.by_device_req_send("Heartbeat", {}) is None
+        # The timed-out request must not leak its pending entry: a late reply
+        # would find it and resolve a future wait_for already cancelled.
+        assert self._pending(ocpp_j_device) == {}
+
+    @pytest.mark.asyncio
+    async def test_late_reply_after_timeout_does_not_kill_read_loop(self, ocpp_j_device):
+        """A CALLRESULT/CALLERROR landing after the timeout is an orphan;
+        resolving the cancelled future instead raised InvalidStateError inside
+        the read loop, silently killing it while the socket stayed open."""
+        ocpp_j_device.response_timeout_seconds = 0
+        sent_frames = []
+        ocpp_j_device._ws = MagicMock()
+        ocpp_j_device._ws.send = AsyncMock(side_effect=lambda raw: sent_frames.append(raw))
+
+        assert await ocpp_j_device.by_device_req_send("Heartbeat", {}) is None
+        req_id = json.loads(sent_frames[0])[1]
+
+        drained = asyncio.Event()
+        late_frames = [
+            json.dumps([3, req_id, {"currentTime": "now"}]),
+            json.dumps([4, req_id, "GenericError", "late rejection", {}]),
+        ]
+
+        async def fake_recv():
+            if late_frames:
+                return late_frames.pop(0)
+            drained.set()
+            await asyncio.Event().wait()  # nothing more to deliver
+
+        ocpp_j_device._ws.recv = AsyncMock(side_effect=fake_recv)
+        loop_task = asyncio.create_task(
+            ocpp_j_device._AbstractDeviceOcppJ__loop_internal())
+        try:
+            await asyncio.wait_for(drained.wait(), timeout=2)
+            assert not loop_task.done()
+        finally:
+            loop_task.cancel()
 
     @pytest.mark.asyncio
     async def test_meter_values_reports_failure_on_timeout(self, device_ocpp_j16):

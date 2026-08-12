@@ -220,11 +220,20 @@ class AbstractDeviceOcppJ(DeviceAbstract):
             return await asyncio.wait_for(result, timeout=self.response_timeout_seconds)
         except asyncio.TimeoutError:
             return self.by_device_req_resp_timeout()
+        finally:
+            # Drop the entry on timeout/cancellation too, so a late reply is
+            # logged as an orphan instead of resolving a dead future, and the
+            # class-level dict doesn't grow with every unanswered request.
+            self.__pending_by_device_reqs.pop(req_id, None)
 
     def __by_device_req_resp_ready(self, future: asyncio.Future, action, resp_json):
         resp = json.dumps(resp_json)
         self.logger.debug(f"By Device Req ({action}) Resp:\n{resp}")
-        future.set_result(resp_json)
+        # The future is cancelled if the reply lands in the same loop iteration
+        # that asyncio.wait_for timed out; set_result would then raise
+        # InvalidStateError inside the websocket read loop and kill it.
+        if not future.done():
+            future.set_result(resp_json)
         pass
 
     async def __loop_internal(self):
