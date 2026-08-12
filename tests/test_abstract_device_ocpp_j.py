@@ -518,6 +518,22 @@ class TestResetChargeCycleOptions:
 
         assert "reservationId" not in options
 
+    def test_drops_delivered_sample_record(self, ocpp_j_device):
+        """The delivered-sample record is per-cycle state written by the
+        ongoing loop; a stale value would make the next cycle's stop reading
+        repeat the previous cycle's last delivered sample."""
+        record_key = ocpp_j_device._LAST_SENT_SCRIPTED_METER_VALUE
+        options = {
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+            ],
+            record_key: 1500,
+        }
+
+        ocpp_j_device._reset_charge_cycle_options(options)
+
+        assert record_key not in options
+
     def test_scripted_meter_values_keep_configured_meter_start(self, ocpp_j_device):
         """A meterStart pinned alongside a scripted meterValues list survives
         the cycle whose stop reading was auto-filled from the script."""
@@ -588,6 +604,42 @@ class TestScriptedMeterValuesStopReading:
         ocpp_j_device.fill_missing_options_charge_stop(options)
 
         assert options["meterStop"] == 9999
+
+    @pytest.mark.asyncio
+    async def test_meter_stop_repeats_last_delivered_sample_after_mid_script_failure(self, ocpp_j_device):
+        """When a send fails mid-script the remaining samples never go out;
+        a meterStop taken from the script's final value would bill energy the
+        session never reported."""
+        options = {
+            "meterStart": 1000,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+                {"meterValue": 10000, "timestamp": "t2", "secondsToSleep": 0},
+            ],
+        }
+        ocpp_j_device.action_meter_value = AsyncMock(side_effect=[True, False])
+
+        assert await ocpp_j_device.flow_charge_ongoing_loop(True, options) is False
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 1500
+
+    @pytest.mark.asyncio
+    async def test_meter_stop_falls_back_to_meter_start_when_no_sample_was_delivered(self, ocpp_j_device):
+        options = {
+            "meterStart": 1000,
+            "chargeStartTime": "2025-01-15T12:00:00+00:00",
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "t1", "secondsToSleep": 0},
+            ],
+        }
+        ocpp_j_device.action_meter_value = AsyncMock(return_value=False)
+
+        assert await ocpp_j_device.flow_charge_ongoing_loop(True, options) is False
+        ocpp_j_device.fill_missing_options_charge_stop(options)
+
+        assert options["meterStop"] == 1000
 
 
 class TestInteractiveReservationHandlers:

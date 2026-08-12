@@ -134,8 +134,8 @@ class AbstractDeviceOcppJ(DeviceAbstract):
         if "chargeStopTime" not in options:
             options["chargeStopTime"] = self.utcnow_iso()
         if "meterStop" not in options:
-            scripted_final = self._scripted_final_meter_value(options)
-            options["meterStop"] = (scripted_final if scripted_final is not None
+            scripted_stop = self._scripted_stop_meter_value(options)
+            options["meterStop"] = (scripted_stop if scripted_stop is not None
                                     else self.charge_meter_value_current(options))
 
     def charge_meter_value_current(self, options: dict):

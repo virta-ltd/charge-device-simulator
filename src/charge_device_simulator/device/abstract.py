@@ -130,10 +130,14 @@ class DeviceAbstract(abc.ABC):
                                and 'secondsToSleep' in i
                                for i in meter_values)):
                 raise ValueError("meterValues must be a list of dictionaries with 'meterValue', 'timestamp' and 'secondsToSleep' keys.")
+            # Baseline for the delivered-sample record: with zero samples
+            # delivered the session reported no energy beyond meterStart.
+            options[self._LAST_SENT_SCRIPTED_METER_VALUE] = options.get("meterStart")
             for i in meter_values:
                 await asyncio.sleep(i["secondsToSleep"])
                 if not await self.action_meter_value(options, meter_value=i["meterValue"], time_stamp=i["timestamp"]):
                     return False
+                options[self._LAST_SENT_SCRIPTED_METER_VALUE] = i["meterValue"]
             return True
         else:
             charge_loop_wait_seconds = options.get("autoActionsLoopDelayInSeconds", 15)
@@ -242,10 +246,25 @@ class DeviceAbstract(abc.ABC):
                 return last["meterValue"]
         return None
 
+    def _scripted_stop_meter_value(self, options: typing.Dict[str, typing.Any]) -> typing.Optional[int]:
+        """Register reading the stop payload should carry for a scripted
+        meterValues session, or None when no script is configured. Prefers the
+        last sample the ongoing loop actually delivered: when a send fails
+        mid-script the remaining samples never went out, and a meterStop above
+        the last delivered reading would bill energy the session never
+        reported. Falls back to the script's final value when the loop hasn't
+        run (direct action_charge_stop calls)."""
+        scripted_final = self._scripted_final_meter_value(options)
+        if scripted_final is None:
+            return None
+        last_sent = options.get(self._LAST_SENT_SCRIPTED_METER_VALUE)
+        return last_sent if last_sent is not None else scripted_final
+
     # Recorded inside the options dict itself so the record travels with the
     # dict shared across cycles. Payload builders read specific keys only, so
     # the extra entry never reaches the wire.
     _PINNED_CHARGE_CYCLE_KEYS = "_pinnedChargeCycleKeys"
+    _LAST_SENT_SCRIPTED_METER_VALUE = "_lastSentScriptedMeterValue"
     _CHARGE_CYCLE_EPHEMERAL_KEYS = ("chargeStartTime", "chargeStopTime", "meterStop", "meterStart")
 
     def _reset_charge_cycle_options(self, options: typing.Dict[str, typing.Any]) -> None:
@@ -281,6 +300,9 @@ class DeviceAbstract(abc.ABC):
             if key not in pinned:
                 options.pop(key, None)
         options.pop("reservationId", None)
+        # Per-cycle delivery record; a stale value would make the next cycle's
+        # stop reading repeat the previous cycle's last delivered sample.
+        options.pop(self._LAST_SENT_SCRIPTED_METER_VALUE, None)
 
     def _consume_reservation_if_used(self, options: typing.Dict[str, typing.Any]) -> None:
         if "reservationId" in options and self.reservation_is_active() \

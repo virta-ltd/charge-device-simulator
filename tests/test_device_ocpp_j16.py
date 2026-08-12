@@ -516,6 +516,40 @@ class TestJ16ScriptedMeterValuesFlow:
         assert second_start["meterStart"] == 1000
         assert second_stop["meterStop"] == 2000
 
+    @pytest.mark.asyncio
+    async def test_stop_reports_last_delivered_sample_when_a_send_fails_mid_script(self, device_ocpp_j16, no_sleep):
+        """A MeterValues send failure aborts the script; the stop must repeat
+        the last sample the backend actually received, not the configured
+        final value the session never reached."""
+        sent = []
+
+        async def fake_send(action, payload):
+            sent.append((action, payload))
+            if action == "StartTransaction":
+                return _stub_start_transaction_response()
+            if (action == "MeterValues"
+                    and payload["meterValue"][0]["sampledValue"][0]["value"] == "10000"):
+                return None
+            return [3, "req-1", {"idTagInfo": {"status": "Accepted"}}]
+
+        device_ocpp_j16.by_device_req_send = AsyncMock(side_effect=fake_send)
+        options = {
+            "connectorId": 1, "idTag": "X", "meterStart": 1000,
+            "meterValues": [
+                {"meterValue": 1500, "timestamp": "2025-01-15T12:10:00+00:00",
+                 "secondsToSleep": 0},
+                {"meterValue": 10000, "timestamp": "2025-01-15T12:20:00+00:00",
+                 "secondsToSleep": 0},
+            ],
+        }
+
+        ok = await device_ocpp_j16.flow_charge(True, options)
+
+        assert ok is False
+        stop = [p for a, p in sent if a == "StopTransaction"][0]
+        assert stop["meterStop"] == 1500
+        assert stop["transactionData"][0]["sampledValue"][0]["value"] == "1500"
+
 
 class TestJ16FlowReserveStatusPayload:
     @pytest.mark.asyncio
