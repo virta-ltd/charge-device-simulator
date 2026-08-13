@@ -18,6 +18,7 @@ class DeviceAbstract(abc.ABC):
         self.deviceId: str = device_id
         self.name: str = ''
         self.charge_in_progress: bool = False
+        self.is_preparing: bool = False
         self.charge_id: typing.Any = -1
         # Set True by Simulator.lifecycle_start when running an interactive
         # session. Enables UX-only behaviors (e.g. refreshing per-cycle
@@ -111,6 +112,10 @@ class DeviceAbstract(abc.ABC):
 
     @abc.abstractmethod
     async def flow_authorize(self, options: dict) -> bool:
+        pass
+
+    @abc.abstractmethod
+    async def flow_status_preparing(self) -> bool:
         pass
 
     @abc.abstractmethod

@@ -229,6 +229,12 @@ class DeviceEnsto(device_abstract.DeviceAbstract):
         self.logger.info(f"Flow {log_title} End")
         return True
 
+    async def flow_status_preparing(self) -> bool:
+        log_title = self.flow_status_preparing.__name__
+        self.logger.info(f"Flow {log_title} Start")
+        self.logger.info(f"Flow {log_title} End (no-op for Ensto)")
+        return True
+
     async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")

@@ -299,6 +299,19 @@ class DeviceOcppS(DeviceAbstract):
         self.logger.info(f"Flow {log_title} End")
         return True
 
+    async def flow_status_preparing(self) -> bool:
+        log_title = self.flow_status_preparing.__name__
+        self.logger.info(f"Flow {log_title} Start")
+        if self.charge_in_progress:
+            self.logger.info(f"Flow {log_title} Skipped, charge in progress")
+        else:
+            self.is_preparing = True
+            if not await self.action_status_update("Preparing", {}):
+                self.is_preparing = False
+                return False
+        self.logger.info(f"Flow {log_title} End")
+        return True
+
     async def flow_charge(self, auto_stop: bool, options: dict) -> bool:
         log_title = self.flow_charge.__name__
         self.logger.info(f"Flow {log_title} Start")
@@ -328,9 +341,14 @@ class DeviceOcppS(DeviceAbstract):
         if not await self.action_charge_stop(options):
             self.charge_in_progress = False
             return False
-        if not await self.action_status_update("Available", options):
-            self.charge_in_progress = False
-            return False
+        if self.is_preparing:
+            if not await self.action_status_update("Preparing", options):
+                self.charge_in_progress = False
+                return False
+        else:
+            if not await self.action_status_update("Available", options):
+                self.charge_in_progress = False
+                return False
         self.logger.info(f"Flow {log_title} End")
         self.charge_in_progress = False
         return True
